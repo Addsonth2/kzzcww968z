@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Radar de Edificações</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* Conceito: o mapa da região é a própria tela. O vendedor trabalha sobre um radar vivo; cor e forma dizem o que é cada ponto, como placas de sinalização. */
+:root{
+  color-scheme:dark;
+  --tinta:#0C1117; --camada:#151C25; --camada2:#1E2732; --linha:#303C4A; --texto:#F4F7F9; --apagado:#A3B0BD;
+  --mul:#EE1638; --mul2:#B30C28; --af:#FFC400; --af2:#E09F00; --pro:#1E6BFF; --pro2:#0F4CC4; --livre:#1FD67F;
+  --v1:#FF5CCB; --v2:#27E1F5; --v3:#FF8A1F; --v4:#B6F32A; --v5:#B79CFF;
+  --display:"Big Shoulders Display","Arial Narrow",Impact,sans-serif; --corpo:Archivo,"Segoe UI",system-ui,sans-serif; --mono:"IBM Plex Mono",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--tinta);color:var(--texto);font:14px/1.45 var(--corpo);overflow:hidden;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+[hidden]{display:none!important}
+:focus-visible{outline:2px solid #fff;outline-offset:2px}
+h1,h2,h3,h4{margin:0;font-family:var(--display);font-weight:800;letter-spacing:.3px;line-height:1.02;text-wrap:balance}
+.mono{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+.apagado{color:var(--apagado)} .pq{font-size:12.5px}
+.linha{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .esp{flex:1}
+.pilha{display:flex;flex-direction:column;gap:10px;min-width:0}
+
+/* mapa e varredura */
+#mapa{position:fixed;inset:0;z-index:0;background:#0A0F14}
+.leaflet-container{background:#0A0F14;font-family:var(--corpo)}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(190deg) saturate(.55) brightness(.82) contrast(.95)}
+.aglo{display:flex;flex-direction:column;align-items:center;gap:3px;width:150px;cursor:pointer;transition:transform .12s}
+.aglo:hover{transform:scale(1.1)}
+.aglo b{font:800 17px/1 var(--display);color:#fff;text-shadow:0 1px 5px #000,0 0 2px #000;letter-spacing:.3px;white-space:nowrap}
+.aglo .cts{display:flex;border-radius:7px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.6);border:2px solid #fff}
+.aglo .cts i{font:900 17px/1 var(--display);font-style:normal;padding:5px 7px;font-variant-numeric:tabular-nums;color:#fff;min-width:27px;text-align:center}
+.aglo i.MUL{background:var(--mul)} .aglo i.AF{background:var(--af);color:#111} .aglo i.PRO{background:var(--pro)}
+.aglo.peq{width:110px}.aglo.peq .cts i{font-size:15px;padding:3px 6px;min-width:24px}
+.mini.prot{outline:2px solid #FFC400}
+.alerta-terr.prot{background:rgba(255,196,0,.14);border-color:var(--af)}
+.aglo.novo .cts{animation:brilho 1.7s ease-out infinite}
+@keyframes brilho{0%{box-shadow:0 0 0 0 rgba(255,255,255,.8)}100%{box-shadow:0 0 0 16px rgba(255,255,255,0)}}
+.leaflet-top{top:70px}.leaflet-bottom{bottom:92px}
+.leaflet-control-attribution{background:rgba(12,17,23,.75)!important;color:var(--apagado)!important;font-size:10px}
+.leaflet-control-attribution a{color:var(--apagado)!important}
+.leaflet-bar a{background:var(--camada)!important;color:var(--texto)!important;border-color:var(--linha)!important}
+#varredura{position:fixed;left:50%;top:50%;width:170vmax;height:170vmax;margin:-85vmax 0 0 -85vmax;border-radius:50%;pointer-events:none;z-index:1;
+  background:conic-gradient(from 0deg,rgba(255,255,255,.13),rgba(255,255,255,0) 55deg,rgba(255,255,255,0) 360deg);animation:gira 7s linear infinite}
+#aneis{position:fixed;inset:0;pointer-events:none;z-index:1;background:repeating-radial-gradient(circle at 50% 50%,transparent 0 139px,rgba(255,255,255,.07) 140px 141px)}
+@keyframes gira{to{transform:rotate(360deg)}}
+
+/* pontos no mapa: cor + letra + forma */
+.ponto{width:24px;height:24px;display:grid;place-items:center;font:800 13px/1 var(--display);border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.55);transition:transform .12s;color:#fff;position:relative}
+.ponto:hover,.ponto.foco{transform:scale(1.35);z-index:5}
+.ponto.MUL{background:var(--mul);border-radius:50%}
+.ponto.AF{background:var(--af);color:#111;border-radius:4px;transform:rotate(45deg)}
+.ponto.AF span{transform:rotate(-45deg)} .ponto.AF:hover,.ponto.AF.foco{transform:rotate(45deg) scale(1.35)}
+.ponto.PRO{background:var(--pro);border-radius:6px}
+.ponto.apagar{opacity:.28;border-color:transparent;transform:scale(.6)}
+.ponto.AF.apagar{transform:rotate(45deg) scale(.6)}
+.ponto.novo::after{content:"";position:absolute;inset:-9px;border-radius:50%;border:2px solid currentColor;animation:pulso 1.7s ease-out infinite;pointer-events:none}
+.ponto.MUL.novo::after{border-color:var(--mul)} .ponto.AF.novo::after{border-color:var(--af)} .ponto.PRO.novo::after{border-color:#6EA2FF}
+@keyframes pulso{from{transform:scale(.6);opacity:1}to{transform:scale(1.5);opacity:0}}
+.pt{position:relative;width:24px;height:24px}
+.ponto.MA{width:32px;height:32px;background:none;border:0;box-shadow:none;filter:drop-shadow(0 2px 5px rgba(0,0,0,.55))}
+.ponto.MA .hx0,.ponto.MA .hx1{position:absolute;display:block;clip-path:polygon(25% 3%,75% 3%,100% 50%,75% 97%,25% 97%,0 50%)}
+.ponto.MA .hx0{inset:0;background:#fff}
+.ponto.MA .hx1{inset:2.5px;background:linear-gradient(118deg,var(--mul) 0 50%,var(--af) 50% 100%)}
+.ponto.MA span{position:absolute;font:800 13px/1 var(--display)}
+.ponto.MA .lm{left:7px;top:6px;color:#fff}
+.ponto.MA .la{right:8px;bottom:6px;color:#111}
+.capa.MA{background:linear-gradient(112deg,var(--mul) 0 72%,var(--af) 72% 100%)}
+.tick .faixa.MA{background:linear-gradient(112deg,var(--mul) 0 72%,var(--af) 72% 100%)}
+.etapa{border-radius:10px;padding:12px 14px;border:1px solid var(--livre);background:rgba(31,214,127,.12)}
+.etapa b{display:block;font:900 26px/1.05 var(--display);color:var(--livre)}
+.etapa.indeferido{border-color:#FF6078;background:rgba(238,22,56,.14)}.etapa.indeferido b{color:#FF8DA0}
+.etapa.analise{border-color:var(--af);background:rgba(255,196,0,.12)}.etapa.analise b{color:var(--af)}
+.pedido{background:var(--af);color:#111;border-radius:10px;padding:12px 14px}
+.pedido .t2{font:800 19px var(--display);letter-spacing:.3px}
+.pedido .selo{background:#111;color:var(--af)}
+.pedido ul{margin:7px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-weight:600}
+.tick .pd,.op-pd{font-size:12.5px;color:#FFD84D;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pedido .texto-af{margin:7px 0 4px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}
+.exigs span.feita{background:rgba(31,214,127,.12);color:#7FEBB5;border-color:rgba(31,214,127,.5);text-decoration:line-through}
+.mini{position:absolute;right:-9px;top:-8px;width:15px;height:15px;border-radius:4px;display:grid;place-items:center;font:800 10.5px/1 var(--display);font-style:normal;color:#0C1117;border:1.5px solid #0C1117;pointer-events:none;z-index:6}
+.ponto.nro{background:#fff!important;color:#111!important;border-color:#111;border-radius:50%;transform:none!important}
+.ponto.nro span{transform:none!important}
+.obra{width:28px;height:28px;display:grid;place-items:center;font:800 14px/1 var(--display);color:#0C1117;border:2px solid #0C1117;clip-path:polygon(50% 0,100% 38%,100% 100%,0 100%,0 38%);transition:transform .12s}
+.obra:hover,.obra.foco{transform:scale(1.3)}
+.obra span{margin-top:6px}
+.obra.vencida{background:#536170!important;color:#fff}
+
+/* moldura */
+#app{position:fixed;inset:0;z-index:5;pointer-events:none}
+#app>*{pointer-events:auto}
+#topo{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;gap:10px;padding:12px max(16px,env(safe-area-inset-left,0px));background:linear-gradient(to bottom,rgba(12,17,23,.95),rgba(12,17,23,0));z-index:12;pointer-events:none}
+#topo>*{pointer-events:auto}
+.marca{display:flex;align-items:center;gap:10px;font:900 24px/1 var(--display);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap}
+.marca small{display:block;font:500 10px/1.2 var(--corpo);letter-spacing:1.6px;color:var(--apagado)}
+.etq{display:inline-flex;align-items:center;gap:6px;background:rgba(21,28,37,.92);border:1px solid var(--linha);border-radius:999px;padding:6px 12px;font-size:12.5px;white-space:nowrap}
+button.etq:hover{border-color:#fff}
+.etq .dot{width:8px;height:8px;border-radius:50%;background:var(--livre)}
+.etq .dot.alerta{background:var(--af)}
+.num-badge{background:#fff;color:#111;border-radius:999px;font-weight:700;font-size:11px;padding:0 6px}
+
+#sinais{position:absolute;left:max(16px,env(safe-area-inset-left,0px));top:70px;display:flex;flex-direction:column;gap:8px;width:172px;z-index:10}
+.sinal{position:relative;display:block;width:100%;text-align:left;border:0;border-radius:10px;padding:10px 14px 9px;color:#fff;overflow:hidden;transition:transform .12s,opacity .12s,filter .12s;box-shadow:0 6px 22px rgba(0,0,0,.4)}
+.sinal:hover{transform:translateX(4px)}
+.sinal b{display:block;font:900 40px/.95 var(--display);font-variant-numeric:tabular-nums}
+.sinal span{font:800 19px/1 var(--display);letter-spacing:.6px}
+.sinal small{position:absolute;right:10px;top:9px;font-size:11px;font-weight:600}
+.sinal.MUL{background:repeating-linear-gradient(-45deg,var(--mul) 0 14px,var(--mul2) 14px 28px)}
+.sinal.AF{background:var(--af);color:#111}
+.sinal.PRO{background:var(--pro)}
+.sinal.desligado{background:var(--camada);color:var(--apagado);box-shadow:inset 0 0 0 1px var(--linha)}
+.sinal.compacto{background:var(--camada);box-shadow:inset 0 0 0 1px var(--linha);padding:8px 12px}
+.sinal.compacto span{font:600 12.5px var(--corpo);letter-spacing:0}
+.sinal.compacto.on{box-shadow:inset 0 0 0 2px #fff}
+
+#doca{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;gap:4px;background:rgba(21,28,37,.96);border:1px solid var(--linha);border-radius:16px;padding:5px;z-index:15;box-shadow:0 10px 34px rgba(0,0,0,.5);max-width:calc(100vw - 24px)}
+#doca button{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:transparent;border-radius:12px;padding:7px 16px;min-width:74px;color:var(--apagado);font-size:12px;font-weight:600;position:relative}
+#doca button:hover{color:#fff}
+#doca button.on{background:#fff;color:#0C1117}
+#doca svg{width:20px;height:20px}
+#doca .num-badge{position:absolute;right:8px;top:3px;background:var(--mul);color:#fff}
+
+#ticker{position:absolute;left:0;right:0;bottom:calc(84px + env(safe-area-inset-bottom,0px));height:30px;overflow:hidden;z-index:8;background:rgba(12,17,23,.72);border-block:1px solid rgba(255,255,255,.08);display:flex;align-items:center}
+#ticker .rot{flex:none;background:#fff;color:#111;font:800 14px/30px var(--display);padding:0 12px;letter-spacing:.5px;height:30px;z-index:1}
+#ticker .faixa{display:flex;gap:28px;white-space:nowrap;animation:corre 75s linear infinite;padding-left:20px}
+#ticker:hover .faixa{animation-play-state:paused}
+#ticker button{background:none;border:0;padding:0;font-size:12.5px;display:inline-flex;gap:6px;align-items:center}
+#ticker button i{font-style:normal;font:800 13px var(--display);padding:1px 6px;border-radius:3px;color:#fff}
+#ticker i.MUL{background:var(--mul)} #ticker i.AF{background:var(--af);color:#111} #ticker i.PRO{background:var(--pro)}
+@keyframes corre{to{transform:translateX(-50%)}}
+
+/* gaveta do dossiê */
+#gaveta{position:absolute;right:0;top:0;bottom:0;width:min(430px,100vw);background:var(--camada);z-index:20;overflow:auto;box-shadow:-14px 0 40px rgba(0,0,0,.5);animation:entra .18s ease-out}
+@keyframes entra{from{transform:translateX(24px)}}
+.capa{position:relative;padding:18px 20px 16px;color:#fff}
+.capa.MUL{background:repeating-linear-gradient(-45deg,var(--mul) 0 18px,var(--mul2) 18px 36px)}
+.capa.AF{background:var(--af);color:#111}
+.capa.PRO{background:var(--pro)}
+.capa.CAMPO{background:var(--cor-dono,#fff);color:#0C1117}
+.capa h2{font-size:64px;font-weight:900;line-height:.9}
+.capa .sub{font-weight:600;margin-top:4px;font-size:13px}
+.fecha{position:absolute;right:12px;top:12px;width:34px;height:34px;border-radius:50%;border:0;background:rgba(0,0,0,.35);color:#fff;font-size:18px;line-height:1}
+.miolo{padding:16px 20px 110px;display:flex;flex-direction:column;gap:14px}
+.miolo h3{font-size:27px}
+.bloco{background:var(--camada2);border-radius:10px;padding:12px 14px}
+.bloco .t{font-size:11px;letter-spacing:1.1px;text-transform:uppercase;color:var(--apagado);font-weight:600;margin-bottom:6px}
+.prazo{display:flex;align-items:center;gap:12px}
+.prazo b{font:900 44px/1 var(--display);font-variant-numeric:tabular-nums}
+.prazo.urg b{color:#FF6078}
+.exigs{display:flex;flex-wrap:wrap;gap:6px}
+.exigs span{background:rgba(255,196,0,.15);color:#FFD84D;border:1px solid rgba(255,196,0,.5);border-radius:6px;padding:3px 8px;font-size:12.5px}
+.alerta-terr{border-radius:10px;padding:12px 14px;background:rgba(255,92,203,.13);border:1px solid var(--v1)}
+.alerta-terr b{display:block;font:800 19px var(--display)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--linha);background:var(--camada2);padding:9px 14px;border-radius:9px;font-weight:600;white-space:nowrap}
+.btn:hover{border-color:#fff}
+.btn.forte{background:#fff;color:#0C1117;border-color:#fff;font:800 19px var(--display);padding:11px 20px;letter-spacing:.3px}
+.btn.forte:hover{background:var(--livre);border-color:var(--livre)}
+.btn.pq{padding:5px 10px;font-size:12.5px;border-radius:7px}
+.btn.perigo{color:#FF8DA0;border-color:#7A2A38}
+.btn:disabled{opacity:.45;cursor:default}
+.seg{display:inline-flex;flex-wrap:wrap;background:var(--tinta);border-radius:9px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;border-radius:7px;padding:5px 10px;font-size:12.5px;font-weight:600;color:var(--apagado)}
+.seg button.on{background:#fff;color:#111}
+.inp{width:100%;background:var(--tinta);border:1px solid var(--linha);border-radius:9px;padding:10px 12px;outline:none}
+.inp:focus{border-color:#fff}
+label.c{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--apagado)}
+label.c .inp{color:var(--texto);font-weight:400;font-size:14px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--linha);background:var(--camada2);border-radius:999px;padding:4px 10px;font-size:12.5px;color:var(--texto)}
+.chip.on{background:#fff;color:#111;border-color:#fff;font-weight:600}
+.dono{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.dono i{width:18px;height:18px;border-radius:5px;display:grid;place-items:center;font:800 12px var(--display);font-style:normal;color:#0C1117}
+
+/* rota */
+#rota{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(122px + env(safe-area-inset-bottom,0px));background:rgba(21,28,37,.97);border:1px solid #fff;border-radius:12px;padding:8px 12px;z-index:11;display:flex;gap:10px;align-items:center;max-width:calc(100vw - 24px);flex-wrap:wrap;justify-content:center}
+
+/* aviso de oportunidade */
+#oport{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(128px + env(safe-area-inset-bottom,0px));width:340px;border-radius:14px;overflow:hidden;z-index:12;box-shadow:0 14px 40px rgba(0,0,0,.6);background:var(--camada);animation:sobe .25s ease-out}
+@keyframes sobe{from{transform:translateY(16px)}}
+.op-capa{background:var(--af);color:#111;padding:10px 14px}
+.op-capa small{display:block;font:800 13px var(--display);letter-spacing:1px}
+.op-capa b{display:block;font:900 38px/1 var(--display);text-transform:uppercase}
+.op-c{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.op-c p{margin:0}
+.op-lista{border-radius:12px;overflow:hidden;background:var(--camada2)}
+.passo{display:inline-flex;align-items:center;background:var(--tinta);border-radius:9px}
+.passo button{width:38px;height:38px;border:0;background:transparent;font-size:20px;font-weight:700}
+.passo b{min-width:30px;text-align:center;font:900 26px var(--display);font-variant-numeric:tabular-nums}
+
+/* telas cheias */
+#painel{position:absolute;inset:0;background:var(--tinta);z-index:6;overflow:auto;padding:70px max(16px,env(safe-area-inset-right,0px)) 110px max(16px,env(safe-area-inset-left,0px))}
+.pagina{max-width:1240px;margin:0 auto}
+.titulo{font-size:46px;font-weight:900;margin-bottom:4px}
+
+/* fila */
+.mesa{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;align-items:start}
+.baralho{position:relative;height:clamp(350px,calc(100vh - 330px),540px);max-width:540px;margin:0 auto;width:100%;touch-action:pan-y}
+.carta{position:absolute;inset:0;background:var(--camada);border-radius:18px;overflow:hidden;box-shadow:0 14px 40px rgba(0,0,0,.55);display:flex;flex-direction:column;user-select:none}
+.carta.tras{transform:translateY(14px) scale(.95);filter:brightness(.6)}
+.carta.tras2{transform:translateY(26px) scale(.9);filter:brightness(.35)}
+.carta.topo{cursor:grab}
+.carta .capa{padding:12px 20px 10px}.carta .capa h2{font-size:58px}
+.carta .miolo{padding:14px 20px 16px;flex:1;overflow:auto}
+.carimbo{position:absolute;top:40px;font:900 58px/1 var(--display);padding:4px 16px;border:6px solid;border-radius:10px;opacity:0;pointer-events:none;background:rgba(12,17,23,.85)}
+.carimbo.pega{left:20px;color:var(--livre);transform:rotate(-14deg)}
+.carimbo.pula{right:20px;color:#fff;transform:rotate(14deg)}
+.controle{display:flex;gap:10px;justify-content:center;margin-top:36px;flex-wrap:wrap}
+.lateral{display:flex;flex-direction:column;gap:12px}
+.atalho{display:inline-block;border:1px solid var(--linha);border-radius:5px;padding:0 6px;font:500 11px var(--mono)}
+.grade-tick{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.tick{background:var(--camada);border-radius:12px;overflow:hidden;text-align:left;border:0;padding:0;display:flex;flex-direction:column;transition:transform .12s;width:100%}
+.tick:hover{transform:translateY(-3px)}
+.tick .faixa{display:flex;align-items:baseline;gap:8px;padding:7px 12px;color:#fff}
+.tick .faixa b{font:900 25px/1 var(--display)}
+.tick .faixa.MUL{background:repeating-linear-gradient(-45deg,var(--mul) 0 10px,var(--mul2) 10px 20px)}
+.tick .faixa.AF{background:var(--af);color:#111}.tick .faixa.PRO{background:var(--pro)}
+.tick .corpo{padding:10px 12px 12px;display:flex;flex-direction:column;gap:3px}
+.tick .corpo h4{font-size:20px}
+
+/* carteira */
+.quadro{display:grid;grid-template-columns:repeat(5,minmax(210px,1fr));gap:10px;overflow-x:auto;padding-bottom:8px}
+.coluna{background:var(--camada);border-radius:12px;padding:10px;min-height:400px;display:flex;flex-direction:column;gap:8px;transition:box-shadow .1s}
+.coluna.sobre{box-shadow:inset 0 0 0 2px #fff}
+.coluna>header{display:flex;align-items:baseline;justify-content:space-between;font:800 21px var(--display)}
+.coluna.fechado>header{color:var(--livre)}
+.cart{background:var(--camada2);border-radius:9px;padding:9px 10px;cursor:grab;display:flex;flex-direction:column;gap:4px;border-top:4px solid var(--cor,#fff)}
+.cart .nome{font-weight:600;overflow-wrap:anywhere}
+.cart select{background:var(--tinta);border:1px solid var(--linha);border-radius:6px;padding:3px 5px;font-size:12px}
+.tp{font:800 13px var(--display);letter-spacing:.3px}
+
+/* território */
+#terr{position:absolute;left:max(16px,env(safe-area-inset-left,0px));top:70px;bottom:calc(92px + env(safe-area-inset-bottom,0px));width:360px;background:rgba(21,28,37,.97);border-radius:14px;z-index:10;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 34px rgba(0,0,0,.5)}
+#terr .cab{padding:14px 16px 12px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--linha)}
+#terr h2{font-size:30px;font-weight:900}
+#terr .rola{overflow:auto;padding:10px 12px;flex:1;display:flex;flex-direction:column;gap:8px}
+.veredito{border-radius:10px;padding:10px 12px}
+.veredito b{display:block;font:900 30px/1 var(--display)}
+.veredito.livre{background:var(--livre);color:#06240F}
+.veredito.ocupada{background:var(--mul);color:#fff}
+.linha-obra{display:flex;gap:10px;align-items:center;background:var(--camada2);border:0;border-radius:9px;padding:9px 10px;text-align:left;width:100%}
+.linha-obra:hover{outline:1px solid #fff}
+.linha-obra .av{flex:none;width:30px;height:30px;border-radius:7px;display:grid;place-items:center;font:800 16px var(--display);color:#0C1117}
+.linha-obra .d{min-width:0;flex:1}
+.linha-obra .d b{display:block;overflow-wrap:anywhere}
+.selo{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;white-space:nowrap;background:var(--tinta)}
+.selo.bom{color:var(--livre)} .selo.vai{color:var(--af)} .selo.foi{color:var(--apagado)} .selo.ok{background:var(--livre);color:#06240F}
+.legenda{display:flex;gap:10px;flex-wrap:wrap;font-size:12px}
+
+/* comando */
+.abas{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 16px}
+.abas button{border:1px solid var(--linha);background:transparent;border-radius:9px;padding:7px 14px;font:800 18px var(--display);color:var(--apagado)}
+.abas button.on{background:#fff;color:#111;border-color:#fff}
+.crachas{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.cracha{background:var(--camada);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.cracha .top{display:flex;gap:12px;align-items:center;padding:12px 14px;background:var(--camada2)}
+.cracha .fot{width:52px;height:52px;flex:none;border-radius:12px;display:grid;place-items:center;font:900 32px var(--display);color:#0C1117}
+.cracha h3{font-size:28px}
+.cracha.bloq{opacity:.72}
+.cracha .cont{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.trio{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.trio div{background:var(--tinta);border-radius:8px;padding:6px 8px}
+.trio b{display:block;font:800 23px/1 var(--display);font-variant-numeric:tabular-nums}
+.trio span{font-size:10.5px;color:var(--apagado)}
+.barras{display:flex;align-items:flex-end;gap:3px;height:44px;border-bottom:1px solid var(--linha)}
+.barras i{flex:1;background:var(--v2);border-radius:3px 3px 0 0;min-height:0;display:block}
+.barras i.zero{background:transparent;border-bottom:2px solid var(--linha)}
+.tab-wrap{overflow-x:auto;background:var(--camada);border-radius:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--apagado);padding:9px 12px;border-bottom:1px solid var(--linha);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--linha)}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.aus td{color:var(--apagado)}
+.conflito{background:var(--camada);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px;border-left:0}
+.conflito h3{font-size:24px}
+.regra{background:var(--camada);border-radius:12px;padding:14px;display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:12px;align-items:center}
+
+/* login */
+#login{position:fixed;inset:0;z-index:60;background:rgba(12,17,23,.72);display:grid;place-items:center;padding:16px;overflow:auto}
+.cx-login{width:100%;max-width:430px;background:var(--camada);border-radius:18px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.cx-login .faixas{display:flex;height:12px}
+.cx-login .faixas i{flex:1}
+.cx-login form{padding:24px;display:flex;flex-direction:column;gap:12px}
+.cx-login h1{font-size:58px;font-weight:900;line-height:.92}
+.erro{background:rgba(238,22,56,.18);border:1px solid var(--mul);border-radius:9px;padding:9px 12px;font-size:13px}
+
+/* camadas */
+#modal{position:fixed;inset:0;background:rgba(5,8,12,.72);display:grid;place-items:center;padding:16px;z-index:70;overflow:auto}
+.cx-modal{background:var(--camada);border-radius:14px;padding:20px;width:100%;max-width:460px;display:flex;flex-direction:column;gap:12px;max-height:92vh;overflow:auto}
+.cx-modal.larga{max-width:760px}
+.cx-modal h3{font-size:30px}
+.fim{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.qr{background:#fff;border-radius:10px;padding:8px;width:216px;margin:0 auto}
+.qr svg{display:block;width:200px;height:200px}
+#flash{position:fixed;left:0;right:0;top:0;z-index:50;padding:14px 20px;display:flex;align-items:center;gap:14px;border:0;width:100%;text-align:left;color:#fff;animation:desce .3s ease-out;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#flash b{font:900 34px/1 var(--display)}
+#flash.MUL{background:repeating-linear-gradient(-45deg,var(--mul) 0 18px,var(--mul2) 18px 36px)} #flash.AF{background:var(--af);color:#111} #flash.PRO{background:var(--pro)}
+@keyframes desce{from{transform:translateY(-100%)}}
+#toast{position:fixed;left:50%;bottom:100px;transform:translate(-50%,10px);background:#fff;color:#111;font-weight:600;padding:10px 16px;border-radius:10px;opacity:0;transition:.18s;pointer-events:none;z-index:80;max-width:calc(100vw - 32px)}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+#aviso{position:fixed;left:50%;transform:translateX(-50%);top:0;background:#fff;color:#111;font-size:11px;font-weight:600;padding:1px 10px;border-radius:0 0 7px 7px;z-index:90;white-space:nowrap;max-width:calc(100vw - 8px);overflow:hidden;text-overflow:ellipsis}
+
+@media (max-width:820px){
+  #sinais{left:12px;right:12px;width:auto;top:58px;flex-direction:row}
+  .sinal{padding:6px 8px 5px;flex:1;min-width:0}
+  .sinal b{font-size:26px}.sinal span{font-size:13px}.sinal small,.sinal.compacto{display:none}
+  .marca{font-size:18px}.marca small{display:none}
+  #topo{padding:14px 12px 8px;gap:6px}
+  #topo .so-pc{display:none}
+  #doca{left:0;right:0;transform:none;bottom:0;border-radius:14px 14px 0 0;max-width:none;justify-content:space-around;padding:4px 4px calc(4px + env(safe-area-inset-bottom,0px))}
+  #doca button{min-width:0;padding:6px 8px;flex:1;font-size:11px}
+  #ticker{bottom:calc(58px + env(safe-area-inset-bottom,0px))}
+  #rota{bottom:calc(94px + env(safe-area-inset-bottom,0px))}
+  #oport{left:12px;right:12px;width:auto;bottom:calc(94px + env(safe-area-inset-bottom,0px))}
+  .op-capa b{font-size:30px}
+  #gaveta{top:auto;bottom:0;width:100%;max-height:84%;border-radius:16px 16px 0 0;z-index:30}
+  .capa h2{font-size:50px}
+  #gaveta.marc{max-height:56%}
+  #gaveta.marc .capa{padding:10px 20px}
+  #gaveta.marc .capa h2{font-size:30px}
+  #terr{left:0;right:0;top:auto;bottom:calc(58px + env(safe-area-inset-bottom,0px));width:auto;max-height:46%;border-radius:14px 14px 0 0}
+  #terr h2{font-size:24px}
+  .mesa{grid-template-columns:minmax(0,1fr)}
+  .baralho{height:clamp(340px,calc(100vh - 340px),480px)}
+  .carta .capa h2{font-size:70px}
+  .titulo{font-size:36px}
+  #painel{padding-bottom:90px}
+  .leaflet-bottom{bottom:96px}
+  .trio b{font-size:20px}
+}
+@media (prefers-reduced-motion:reduce){
+  #varredura{animation:none;display:none}
+  #ticker .faixa{animation:none;overflow-x:auto}
+  .ponto.novo::after{animation:none;opacity:.7}
+  #gaveta,#flash,#oport{animation:none}
+}
+@media print{
+  body.imprimir #app,body.imprimir #mapa,body.imprimir #varredura,body.imprimir #aneis,body.imprimir #aviso,body.imprimir .fim{display:none!important}
+  body.imprimir,body.imprimir html{overflow:visible;background:#fff;color:#000}
+  body.imprimir #modal{position:static;background:#fff;display:block;padding:0}
+  body.imprimir .cx-modal{background:#fff;color:#000;max-height:none;max-width:none}
+  body.imprimir .tab-wrap{background:#fff} body.imprimir th,body.imprimir td{color:#000;border-color:#999}
+}
+
+/* ajustes do celular e notificacoes */
+.so-cel{display:none}
+.fecha{position:sticky;top:10px;right:auto;display:block;margin:10px 12px -44px auto;z-index:5}
+.x-modal{position:sticky;top:0;align-self:flex-end;flex:none;width:36px;height:36px;border-radius:50%;border:0;background:var(--camada2);color:#fff;font-size:20px;line-height:1;margin-bottom:-48px;z-index:3}
+.info{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--apagado);background:transparent;color:var(--apagado);font:600 13px/1 var(--corpo);vertical-align:middle;margin-left:4px}
+.sino{width:17px;height:17px;display:block}
+.notif{background:var(--camada2);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;border-left:4px solid transparent;text-align:left;width:100%;border-top:0;border-right:0;border-bottom:0}
+.notif.nova{border-left-color:var(--af)}
+.notif b{font-size:14px}
+.op-linha{display:flex;align-items:center;gap:10px;width:100%;border:0;border-radius:10px;background:var(--af);color:#111;padding:10px 12px;text-align:left}
+.op-linha b{font:900 21px/1 var(--display);text-transform:uppercase}
+.secao{font:800 19px var(--display);margin-top:4px}
+.mcli{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.mcli .notif{cursor:pointer}
+.fx-chip{white-space:nowrap}
+@media (max-width:820px){
+  #aviso{left:0;right:0;top:0;transform:none;width:100%;max-width:none;border-radius:0;text-align:center;font-size:10px;padding:2px 8px;line-height:13px;height:17px}
+  #topo{top:17px;background:var(--tinta);padding:7px 12px;gap:6px;border-bottom:1px solid var(--linha)}
+  #topo .etq{padding:5px 9px;font-size:12px}
+  #sinais{top:66px}
+  .leaflet-top{top:136px}
+  #painel{padding-top:68px}
+  .so-cel{display:block}
+  .lateral.so-pc{display:none}
+  #gaveta{max-height:calc(100% - 66px)}
+  #gaveta.marc{max-height:58%}
+  .aglo b{font-size:15px}.aglo .cts i{font-size:15px;padding:4px 6px;min-width:24px}
+}
+</style>
+</head>
+<body>
+<div id="mapa"></div><div id="aneis" aria-hidden="true"></div><div id="varredura" aria-hidden="true"></div>
+<div id="app" hidden>
+  <header id="topo"></header>
+  <section id="sinais" aria-label="Tipos no mapa"></section>
+  <section id="terr" hidden></section>
+  <div id="ticker" hidden></div>
+  <div id="rota" hidden></div>
+  <aside id="oport" hidden></aside>
+  <section id="painel" hidden></section>
+  <aside id="gaveta" hidden></aside>
+  <nav id="doca" aria-label="Navegação"></nav>
+</div>
+<div id="login"></div>
+<div id="camada-modal"></div>
+<div id="camada-flash"></div>
+<div id="toast" role="status"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+"use strict";
+/* ========== utilitários ========== */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+function rngDe(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd=rngDe(77), pick=a=>a[Math.floor(rnd()*a.length)];
+const MIN=60000,H=60*MIN,D=24*H,AGORA=Date.now();
+const fmtData=t=>new Date(t).toLocaleDateString('pt-BR');
+const fmtHora=t=>new Date(t).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+const area=n=>n==null?'Área não informada':n.toLocaleString('pt-BR')+' m²';
+const REAL=window.RADAR_REAL||null;
+const diasDesde=t=>Math.floor((Date.now()-t)/D);
+function haQuanto(t){if(!t)return 'nunca';const m=Math.round((Date.now()-t)/MIN);if(m<1)return 'agora';if(m<60)return 'há '+m+' min';const h=Math.round(m/60);if(h<24)return 'há '+h+' h';return 'há '+Math.round(h/24)+' dia(s)';}
+function metros(a,b){const R=6371000,r=x=>x*Math.PI/180,dLa=r(b.lat-a.lat),dLo=r(b.lng-a.lng),s=Math.sin(dLa/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(s));}
+function parecido(a,b){a=norm(a);b=norm(b);if(!a||!b)return 0;if(a===b)return 1;const bi=s=>{const o=[];for(let i=0;i<s.length-1;i++)o.push(s.slice(i,i+2));return o;};const x=bi(a),y=bi(b);let n=0;const c=[...y];x.forEach(g=>{const i=c.indexOf(g);if(i>=0){n++;c.splice(i,1);}});return 2*n/(x.length+y.length||1);}
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('on'),2800);}
+const ICO={radar:'<path d="M12 12 19 5"/><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/>',fila:'<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M3 7v10M21 7v10"/>',cart:'<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/>',terr:'<path d="M12 21s7-6.3 7-11.5A7 7 0 0 0 5 9.5C5 14.700 12 21 12 21Z"/><circle cx="12" cy="9.500" r="2.500"/>',cmd:'<circle cx="9" cy="8" r="3.500"/><path d="M3 20c.5-4 3-6 6-6s5.500 2 6 6"/><path d="M16 5a3 3 0 0 1 0 6M18 14c2 .8 3 2.800 3.300 6"/>'};
+const svg=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICO[n]}</svg>`;
+
+/* ========== referência (os dados vêm do banco, em radar.js) ========== */
+const CIDADES={Brusque:[-27.098,-48.917],'Botuverá':[-27.2,-49.074],Guabiruba:[-27.086,-48.981],Gaspar:[-26.931,-48.959],'Porto Belo':[-27.158,-48.553,1],'Nova Trento':[-27.286,-48.93],Itapema:[-27.09,-48.611,1],Blumenau:[-26.919,-49.066],Navegantes:[-26.899,-48.654,1],'Itajaí':[-26.908,-48.682,1],
+  'Vidal Ramos':[-27.39,-49.36],'Presidente Nereu':[-27.28,-49.39],Indaial:[-26.9,-49.23],'Timbó':[-26.82,-49.27],Pomerode:[-26.74,-49.18],'São João Batista':[-27.28,-48.85],Tijucas:[-27.24,-48.65,1],Canelinha:[-27.26,-48.77],'Major Gercino':[-27.42,-48.95],'Camboriú':[-27.03,-48.66],'Balneário Camboriú':[-26.99,-48.64,1],Ilhota:[-26.9,-48.83],Penha:[-26.77,-48.65,1],'Balneário Piçarras':[-26.76,-48.68,1],Bombinhas:[-27.14,-48.52,1],'Luiz Alves':[-26.72,-48.93]};
+const NC=Object.keys(CIDADES);
+const VENDAS=['Projeto','Hidrantes','Alarme','Sprinklers','Extintores','Iluminação de emergência','Sinalização','SPDA','Saídas de emergência','Porta corta-fogo','Manutenção','Recarga','Laudo e ART','Documentação','Regularização','Treinamento','Outro'];
+const STAT=[['novo','A abordar'],['contatado','Contatado'],['visitar','Visitar'],['fechado','Fechado'],['descartado','Descartado']];
+const nomeStat=k=>(STAT.find(s=>s[0]===k)||[,''])[1];
+const TIPO={MA:{g:'MULTA + AF',l:'MA',sub:'Mesma edificação'},MUL:{g:'MULTA',l:'M',sub:'Auto de infração'},AF:{g:'AF',l:'A',sub:'Auto de fiscalização'},PRO:{g:'PROTOCOLO',l:'P',sub:'Projeto em análise'}};
+const conta=id=>contas.find(c=>c.id===id);
+const vendedores=()=>contas.filter(c=>c.papel==='vendedor');
+function posEm(c,esp){const[b,g,costa]=CIDADES[c],e=esp||1;let dl=(rnd()-.5)*.05*e,dg=(rnd()-.5)*.06*e;if(costa)dg=-Math.abs(dg)-.006;return{lat:b+dl,lng:g+dg};}
+function chaveDia(t){const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+let contas=[],leads=[],obras=[],pedidos=[],uso={},porRE={};let seqPed=1,seqObra=1;
+/* ========== estado ========== */
+const st={eu:null,erro:'',vista:'radar',f:{texto:'',cidades:new Set(),areaMin:0,areaMax:0,exig:new Set(),dono:'',soNovos:false},tipos:new Set(['MUL','AF','PRO']),campo:!REAL,aberto:null,rota:[],pulados:new Set(),filaModo:'cartas',quemCart:null,terrFiltro:'todas',busca:'',marcando:null,perto:null,cmd:'equipe',dia:chaveDia(AGORA),som:false,coleta:AGORA-40*MIN,cfg:{reserva:45,reservaSem:15,raio:150,prova:200,alertaMin:3,alertaDias:7},opFechada:new Set(),opN:{},viagens:[],notifs:[],opAberta:null,cartModo:'funil'};
+const souAdm=()=>st.eu&&st.eu.papel==='admin';
+const protegidos=[];let seqProt=1;st.hits=[];
+const grupo=l=>(l.re&&porRE[l.re])||[l];
+const gr=x=>x.tipo==='CAMPO'?[x]:grupo(x);
+const ORD={MUL:0,AF:1,PRO:2};
+function unicos(a){const v=new Set();return a.filter(x=>{if(x.tipo==='CAMPO'||!x.re)return true;if(v.has(x.re))return false;v.add(x.re);return true;});}
+function resumoG(l){if(l.tipo==='CAMPO')return 'CAMPO';const g=grupo(l);return ['MUL','AF','PRO'].map(t=>[g.filter(x=>x.tipo===t).length,TIPO[t].g]).filter(x=>x[0]).map(x=>x[0]+' '+x[1]).join(' · ');}
+const subG=l=>grupo(l).length>1?resumoG(l):TIPO[l.tipo].sub;
+/* AF que pede projeto + protocolo mais novo na mesma edificação: em tese atendido, mas o lead segue ativo.
+   O arquivo antigo não guardou a data de emissão do AF; aqui a referência é a data em que ele foi detectado. */
+const PROJ=/projeto preventivo|PPCI|RPCI/i;
+function cobre(af){if(af.tipo!=='AF'||!(af.exig||[]).some(e=>PROJ.test(e)))return null;return grupo(af).filter(x=>x.tipo==='PRO'&&x.data&&x.data>(af.emissao||af.det)).sort((a,b)=>b.data-a.data)[0]||null;}
+const cobreTudo=af=>!!cobre(af)&&af.exig.every(e=>PROJ.test(e));
+const prazoEf=x=>cobreTudo(x)?null:x.prazo;
+function etapa(l){const pr=grupo(l).filter(x=>x.tipo==='AF').map(cobre).filter(Boolean).sort((a,b)=>b.data-a.data)[0];return pr?{k:pr.sit[1]==='def'?'executar':pr.sit[1]==='ind'?'indeferido':'analise',pro:pr}:null;}
+const ETAPA={executar:['PROJETO DEFERIDO · FALTA EXECUTAR','O AF pediu projeto e a edificação tem protocolo mais novo, já deferido. O próximo passo é executar.'],indeferido:['PROJETO INDEFERIDO','O AF pediu projeto e o protocolo mais novo foi indeferido. Precisa corrigir e protocolar de novo.'],analise:['PROJETO EM ANÁLISE','O AF pediu projeto e a edificação tem protocolo mais novo, ainda sem deferimento. Depois falta executar.']};
+function simbolo(l,filtro){const g=grupo(l),on=t=>!filtro||st.tipos.has(t),m=on('MUL')&&g.some(x=>x.tipo==='MUL'),a=on('AF')&&g.some(x=>x.tipo==='AF'&&!cobreTudo(x)),pr=on('PRO')&&g.some(x=>x.tipo==='PRO');return m&&a?'MA':m?'MUL':a?'AF':pr?'PRO':l.tipo;}
+const areaG=l=>{const a=grupo(l).map(x=>x.area).filter(x=>x!=null);return a.length?Math.max(...a):null;};
+const pontoTxt=l=>l.prec==='numero'?'Ponto pelo número':l.prec==='rua'?'Ponto pela rua':l.aprox?'Ponto aproximado':'';
+const ehNovo=l=>Date.now()-l.det<24*H;
+const achar=id=>leads.find(l=>l.id===id)||obras.find(o=>o.id===id);
+const ultVisita=x=>(x.visitas||[])[(x.visitas||[]).length-1]||null;
+const ultProva=x=>[...(x.visitas||[])].reverse().find(v=>v.prova)||null;
+function diasReserva(o){const u=ultVisita(o);return (u&&u.prova?st.cfg.reserva:st.cfg.reservaSem)-diasDesde(o.ultVisita);}
+function obraAtiva(o){return o.status!=='descartado';}
+function precisaRevisar(o){if(!obraAtiva(o)||o.status==='fechado')return false;if(o.retorno)return retDate(o)<Date.now();return diasReserva(o)<=0;}
+const emRevisao=()=>obras.filter(precisaRevisar);
+function contar(c){if(!st.eu)return;const u=(uso[chaveDia(Date.now())]||{})[st.eu.id];if(u){u[c]=(u[c]||0)+1;u.ult=Date.now();st.eu.ult=Date.now();}}
+
+/* ========== conflito de território ========== */
+function checar(d,souEu){const out=[];
+  obras.forEach(o=>{if(!obraAtiva(o)||o.dono===souEu||o.id===d.id)return;const mot=[];
+    if(d.lat!=null&&!d.aprox&&metros(d,o)<=st.cfg.raio)mot.push('a '+Math.round(metros(d,o))+' m');
+    if(d.nome&&d.cidade===o.cidade&&parecido(d.nome,o.nome)>=.72)mot.push('mesmo nome');
+    if(d.rua&&d.num&&d.cidade===o.cidade&&norm(d.rua)===norm(o.rua)&&String(d.num)===String(o.num))mot.push('mesmo endereço');
+    if(mot.length)out.push({o,mot});});
+  return out.sort((a,b)=>metros(d,a.o)-metros(d,b.o));}
+function buscaTerr(q){const n=norm(q);if(n.length<3)return null;const pal=n.split(' ');const bate=x=>{const t=norm(x.nome+' '+x.rua+' '+x.num+' '+x.cidade);return pal.every(p=>t.includes(p));};
+  return{obras:obras.filter(o=>obraAtiva(o)&&bate(o)),leads:leads.filter(l=>l.dono&&bate(l))};}
+
+/* ========== mapa ========== */
+let mapa=null,camada=null,pinoNovo=null;
+function iniciarMapa(){if(mapa||typeof L==='undefined')return;
+  mapa=L.map('mapa',{zoomControl:false,attributionControl:true,preferCanvas:false}).setView([-27.04,-48.84],10);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(mapa);
+  L.control.zoom({position:'topright'}).addTo(mapa);
+  camada=L.layerGroup().addTo(mapa);
+  mapa.on('moveend',pintarMapa);
+  mapa.on('click',e=>{if(st.marcando){st.marcando.lat=e.latlng.lat;st.marcando.lng=e.latlng.lng;st.marcando.manual=true;desenharPino();pinoMudou();}});}
+function enquadrar(){if(!mapa)return;mapa.invalidateSize();const c=NC.filter(x=>leads.some(l=>l.cidade===x)).map(x=>CIDADES[x].slice(0,2));if(!c.length)return;const cel=innerWidth<=820;mapa.fitBounds(c,{paddingTopLeft:cel?[34,150]:[210,90],paddingBottomRight:cel?[34,120]:[60,130],animate:false});}
+function divi(html,tam){return L.divIcon({className:'',html,iconSize:[tam,tam],iconAnchor:[tam/2,tam/2]});}
+const TAGS={RPCI:/rpci/i,PPCI:/ppci|projeto preventivo/i,Hidrante:/hidr[aá]ulico|hidrante/i,Alarme:/alarme|detec/i,Sprinkler:/chuveiro|sprinkler/i,SPDA:/spda|descargas/i,'Saídas de emergência':/sa[ií]da/i,Vistoria:/vistoria/i,Documentos:/documento|laudo/i,Vitais:/extintor|sinaliza|ilumina/i};
+const FAIXAS=[[0,750,'Até 750 m²'],[750,0,'Acima de 750'],[1500,0,'Acima de 1.500'],[3000,0,'Acima de 3.000'],[5000,0,'Acima de 5.000'],[10000,0,'Acima de 10.000']];
+function passaFiltro(l){const f=st.f,t=norm(f.texto);if(f.cidades.size&&!f.cidades.has(l.cidade))return false;if(f.areaMin||f.areaMax){const ag=areaG(l);if(ag==null||(f.areaMin&&ag<=f.areaMin)||(f.areaMax&&ag>f.areaMax))return false;}
+  if(f.exig.size){const ex=grupo(l).flatMap(x=>x.exig||[]).join(' ');if(![...f.exig].some(k=>TAGS[k].test(ex)))return false;}if(f.soNovos&&!ehNovo(l))return false;
+  if(f.dono==='__sem'&&l.dono)return false;if(f.dono&&f.dono!=='__sem'&&l.dono!==f.dono)return false;
+  if(t&&!t.split(' ').every(p=>norm(l.nome+' '+l.id+' '+l.rua+' '+l.bairro+' '+l.cidade).includes(p)))return false;return true;}
+function pintarMapa(){if(!mapa)return;camada.clearLayers();const v=st.vista;
+  if(v==='radar'){
+    const z=mapa.getZoom(),longe=z<12,lim=mapa.getBounds().pad(.2);
+    if(longe){const dist=innerWidth<=820?92:128,nos=[],grp=[];
+      NC.forEach(c=>{const ls=leads.filter(l=>l.cidade===c&&st.tipos.has(l.tipo)&&passaFiltro(l));if(ls.length)nos.push({c,ls,p:mapa.latLngToContainerPoint(CIDADES[c].slice(0,2))});});
+      nos.sort((a,b)=>b.ls.length-a.ls.length).forEach(n=>{const g=grp.find(x=>x.p.distanceTo(n.p)<dist);if(g){g.cs.push(n.c);g.ls=g.ls.concat(n.ls);}else grp.push({p:n.p,cs:[n.c],ls:n.ls});});
+      grp.forEach(g=>{const q=t=>g.ls.filter(l=>l.tipo===t).length,cts=['MUL','AF','PRO'].filter(t=>q(t)).map(t=>`<i class="${t}">${q(t)}</i>`).join(''),nome=g.cs[0]+(g.cs.length>1?' +'+(g.cs.length-1):''),pos=CIDADES[g.cs[0]].slice(0,2);
+        const m=L.marker(pos,{icon:L.divIcon({className:'',html:`<div class="aglo ${g.ls.some(ehNovo)?'novo':''}" data-cid="${esc(nome)}"><b>${esc(nome)}</b><span class="cts">${cts}</span></div>`,iconSize:[150,50],iconAnchor:[75,25]}),title:g.cs.join(', '),alt:g.cs.join(', ')+', '+g.ls.length+' registros',zIndexOffset:600});
+        m.on('click',()=>{if(g.cs.length>1){const pts=g.cs.map(c=>CIDADES[c]);mapa.flyTo([pts.reduce((a,x)=>a+x[0],0)/pts.length,pts.reduce((a,x)=>a+x[1],0)/pts.length],z+1,{duration:.6});}else mapa.flyTo(pos,13,{duration:.7});});camada.addLayer(m);});}
+    const nrDe=l=>st.rota.findIndex(id=>gr(l).some(x=>x.id===id)),abertoEm=l=>gr(l).some(x=>x.id===st.aberto);
+    const vis=unicos(leads.filter(l=>st.tipos.has(l.tipo)&&passaFiltro(l)).sort((a,b)=>ORD[a.tipo]-ORD[b.tipo])),soltos=[],grade={};
+    vis.forEach(l=>{const fixo=nrDe(l)>=0||abertoEm(l);if(longe&&!fixo)return;if(!longe&&!lim.contains([l.lat,l.lng]))return;if(longe||fixo||ehNovo(l)||z>=16){soltos.push(l);return;}const pt=mapa.project([l.lat,l.lng],z),k=Math.floor(pt.x/84)+':'+Math.floor(pt.y/84);(grade[k]=grade[k]||[]).push(l);});
+    Object.values(grade).forEach(g=>{if(g.length===1){soltos.push(g[0]);return;}const q=t=>st.tipos.has(t)?g.reduce((n,x)=>n+grupo(x).filter(y=>y.tipo===t&&passaFiltro(y)).length,0):0,la=g.reduce((a,x)=>a+x.lat,0)/g.length,lo=g.reduce((a,x)=>a+x.lng,0)/g.length,cts=['MUL','AF','PRO'].filter(t=>q(t)).map(t=>`<i class="${t}">${q(t)}</i>`).join('');
+      const m=L.marker([la,lo],{icon:L.divIcon({className:'',html:`<div class="aglo peq"><span class="cts">${cts}</span></div>`,iconSize:[110,32],iconAnchor:[55,16]}),title:g.length+' edificações',alt:g.length+' edificações',zIndexOffset:550});m.on('click',()=>mapa.flyTo([la,lo],Math.min(z+2,16),{duration:.6}));camada.addLayer(m);});
+    soltos.forEach(l=>{const nr=nrDe(l);
+      const sb=simbolo(l,true),novo=grupo(l).some(ehNovo),foco=abertoEm(l)?'foco':'',lg=sb==='MA'&&nr<0?32:24;
+      const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:'',html:`<div class="pt" style="width:${lg}px;height:${lg}px" data-re="${esc(l.re||'')}" data-sb="${sb}">${nr>=0?`<div class="ponto ${l.tipo} nro" data-id="${l.id}"><span>${nr+1}</span></div>`:sb==='MA'?`<div class="ponto MA ${novo?'novo':''} ${foco}" data-id="${l.id}"><i class="hx0"></i><i class="hx1"></i><span class="lm">M</span><span class="la">A</span></div>`:`<div class="ponto ${sb} ${novo?'novo':''} ${foco}" data-id="${l.id}"><span>${TIPO[sb].l}</span></div>`}${miniDono(l)}</div>`,iconSize:[lg,lg],iconAnchor:[lg/2,lg/2]}),title:l.nome+(grupo(l).length>1?' · '+resumoG(l):'')+(l.dono?' · '+conta(l.dono).nome:''),riseOnHover:true,zIndexOffset:(sb==='MA'||sb==='MUL')?300:novo?500:0,keyboard:true,alt:resumoG(l)+' '+l.nome});
+      m.on('click',()=>abrir(l.id));camada.addLayer(m);});
+    if(st.campo&&!longe)desenharObras(false);
+    if(st.rota.length>1){const pts=st.rota.map(achar).filter(Boolean).map(p=>[p.lat,p.lng]);camada.addLayer(L.polyline(pts,{color:'#fff',weight:3,dashArray:'3 9',lineCap:'round'}));}
+  }
+  if(v==='territorio'){desenharObras(true);
+    if(st.perto){camada.addLayer(L.circle([st.perto.lat,st.perto.lng],{radius:1000,color:'#fff',weight:2,dashArray:'6 6',fillOpacity:.05}));
+      leads.filter(l=>metros(st.perto,l)<=1000).forEach(l=>{const m=L.marker([l.lat,l.lng],{icon:divi(`<div class="ponto ${l.tipo}"><span>${TIPO[l.tipo].l}</span></div>`,24),title:l.nome});m.on('click',()=>abrir(l.id));camada.addLayer(m);});}
+    desenharPino();
+  }}
+function miniDono(l){const c=l.dono&&conta(l.dono);return c?`<i class="mini ${l.prot?'prot':''}" data-dono="${c.id}" style="background:${c.cor}">${c.l}</i>`:'';}
+function desenharObras(comRaio){obras.forEach(o=>{const at=obraAtiva(o),d=conta(o.dono);
+    if(st.vista==='territorio'){const r=filtroObra(o);if(!r)return;}
+    if(comRaio&&at)camada.addLayer(L.circle([o.lat,o.lng],{radius:st.cfg.raio,color:corReal(d),weight:1,fillOpacity:.14,interactive:false}));
+    const m=L.marker([o.lat,o.lng],{icon:divi(`<div class="obra ${at?'':'vencida'} ${st.aberto===o.id?'foco':''}" style="background:${d.cor}"><span>${d.l}</span></div>`,28),title:o.nome+' · '+d.nome,zIndexOffset:400,alt:'Obra de '+d.nome});
+    m.on('click',()=>abrir(o.id));camada.addLayer(m);});}
+const CORES={'var(--v1)':'#FF5CCB','var(--v2)':'#27E1F5','var(--v3)':'#FF8A1F','var(--v4)':'#B6F32A','var(--v5)':'#B79CFF'};
+const corReal=c=>CORES[c.cor]||c.cor;
+function desenharPino(){if(!mapa)return;if(pinoNovo){pinoNovo.remove();pinoNovo=null;}if(!st.marcando||st.marcando.lat==null)return;
+  pinoNovo=L.marker([st.marcando.lat,st.marcando.lng],{draggable:true,icon:divi(`<div class="obra" style="background:#fff"><span>+</span></div>`,28),zIndexOffset:900}).addTo(mapa);
+  pinoNovo.on('dragend',e=>{const p=e.target.getLatLng();st.marcando.lat=p.lat;st.marcando.lng=p.lng;st.marcando.manual=true;pinoMudou();});}
+function pinoMudou(){if(st.marcando.prova){st.marcando.prova=null;pintarGaveta();}else atualizarChecagem();}
+
+/* ========== login ========== */
+function telaLogin(){$('#app').hidden=true;$('#login').hidden=false;
+  $('#login').innerHTML=`<div class="cx-login"><div class="faixas"><i style="background:var(--mul)"></i><i style="background:var(--af)"></i><i style="background:var(--pro)"></i></div>
+  <form onsubmit="event.preventDefault();entrar()"><h1>RADAR DE EDIFICAÇÕES</h1>
+  ${st.erro?`<div class="erro" id="erro-login">${esc(st.erro)}</div>`:''}
+  <label class="c">E-mail<input class="inp" id="l-email" type="email" autocomplete="off" value="ana@exemplo.com" required></label>
+  <label class="c">Senha<input class="inp" id="l-senha" type="password" autocomplete="off" value="exemplo-esboco" required></label>
+  <button class="btn forte" type="submit">Entrar</button>
+  <div class="linha"><button class="btn" style="flex:1" type="button" id="demo-vend" onclick="entrarDemo('ana@exemplo.com')">Ver como vendedor</button><button class="btn" style="flex:1" type="button" id="demo-adm" onclick="entrarDemo('admin@exemplo.com')">Ver como administrador</button></div>
+  <p class="pq apagado" style="margin:0">Acesso individual. Entradas, IP e uso são registrados pelo administrador.</p>
+  <p class="pq apagado" style="margin:0">Demonstração: vale qualquer senha. Também entram bruno@ e caio@exemplo.com; dani@exemplo.com está bloqueada.</p></form></div>`;}
+function entrarDemo(e){$('#l-email').value=e;entrar();}
+function entrar(){const c=contas.find(x=>x.email===$('#l-email').value.trim().toLowerCase());
+  if(!c){st.erro='E-mail ou senha incorretos.';return telaLogin();}
+  if(c.bloq){st.erro='Esta conta está bloqueada. Fale com o administrador.';return telaLogin();}
+  st.eu=c;st.erro='';st.vista='radar';st.aberto=null;c.sess=true;c.ent=c.ult=c.ultLogin=Date.now();
+  const k=chaveDia(Date.now());uso[k]=uso[k]||{};if(uso[k][c.id]){uso[k][c.id].logins++;uso[k][c.id].ult=Date.now();}else uso[k][c.id]={ent:Date.now(),ult:Date.now(),ip:c.ip,ap:c.ap,min:0,logins:1,abertos:0,pegos:0,marcados:0,visitas:0,comprovadas:0};
+  if(!souAdm())st.quemCart=c.id;st.opFechada=new Set();st.opN={};
+  limparFiltros();$('#login').hidden=true;$('#app').hidden=false;iniciarMapa();enquadrar();pintar();}
+function sair(){if(st.eu)st.eu.sess=false;st.eu=null;st.rota=[];st.marcando=null;st.perto=null;fecharModal();telaLogin();}
+
+/* ========== pintura geral ========== */
+function pintar(){if(!st.eu)return telaLogin();
+  if(st.vista==='comando'&&!souAdm())st.vista='radar';
+  const v=st.vista,mapaVisivel=v==='radar'||v==='territorio';
+  pintarTopo();pintarDoca();
+  $('#sinais').hidden=v!=='radar';if(v==='radar')pintarSinais();
+  $('#ticker').hidden=v!=='radar';if(v==='radar')pintarTicker();
+  $('#terr').hidden=v!=='territorio';if(v==='territorio')pintarTerr();
+  $('#painel').hidden=mapaVisivel;
+  $('#varredura').hidden=$('#aneis').hidden=v!=='radar';
+  const r=$('#rota');r.hidden=!(v==='radar'&&st.rota.length);if(!r.hidden)r.innerHTML=`<b style="font:800 20px var(--display)">${st.rota.length} parada(s)</b><button class="btn pq" onclick="st.rota=[];pintar()">Limpar</button><button class="btn pq" id="b-rota" style="background:#fff;color:#111" onclick="modalRota()">Montar rota</button>`;
+  if(v==='fila')pintarFila();if(v==='carteira')pintarCarteira();if(v==='comando')pintarComando();
+  pintarGaveta();pintarMapa();pintarOport();}
+function ir(v){if(v==='comando'&&!souAdm()){toast('Área do administrador.');return;}if(v!=='territorio'){st.marcando=null;desenharPino();}st.vista=v;st.aberto=null;pintar();if(mapa)setTimeout(()=>mapa.invalidateSize(),30);}
+function oportunidades(){const m={};leads.forEach(l=>{if(l.tipo==='AF'&&!l.dono&&prazoEf(l)!=null&&l.prazo>=0&&l.prazo<=st.cfg.alertaDias&&!checar(l,st.eu.id).length)(m[l.cidade]=m[l.cidade]||[]).push(l);});
+  return Object.entries(m).map(([c,v])=>[c,unicos(v)]).filter(([,v])=>v.length>=st.cfg.alertaMin).map(([cidade,v])=>({cidade,itens:v.sort((a,b)=>a.prazo-b.prazo)})).sort((a,b)=>a.itens[0].prazo-b.itens[0].prazo||b.itens.length-a.itens.length);}
+const quando=p=>p===0?'hoje':p===1?'amanhã':'em '+p+' dias';
+function cartaoOp(o,podeIr){const n=Math.min(st.opN[o.cidade]||o.itens.length,o.itens.length),jv=st.viagens.filter(v=>v.cidade===o.cidade&&chaveDia(v.t)===chaveDia(Date.now()));
+  return `<div class="op-capa"><small>AF VENCENDO</small><b>${esc(o.cidade)}</b></div><div class="op-c" data-op="${esc(o.cidade)}"><p>${o.itens.length} AF sem dono, e o primeiro vence ${quando(o.itens[0].prazo)}. Quer ir para lá?</p>
+  ${jv.map(v=>`<p class="pq apagado">${esc(conta(v.quem).nome)} pegou ${v.n} aqui hoje.</p>`).join('')}
+  <div class="pq apagado">${o.itens.slice(0,3).map(l=>`<div>${esc(l.nome)} · ${quando(l.prazo)}${(l.pend||[])[0]?`<div class="op-pd">${esc(l.pend[0])}</div>`:''}</div>`).join('')}${o.itens.length>3?`<div>e mais ${o.itens.length-3}</div>`:''}</div>
+  ${podeIr?`<div class="linha"><span class="pq">Quantos você vai visitar?</span><span class="esp"></span><span class="passo"><button aria-label="Menos" onclick="passoOp('${esc(o.cidade)}',-1)">−</button><b class="op-n">${n}</b><button aria-label="Mais" onclick="passoOp('${esc(o.cidade)}',1)">+</button></span></div>
+  <div class="linha"><button class="btn" data-acao="nao" onclick="fecharOp('${esc(o.cidade)}')">Agora não</button><span class="esp"></span><button class="btn forte" data-acao="ir" onclick="aceitarOp('${esc(o.cidade)}')">QUERO IR</button></div>`:''}</div>`;}
+function pintarOport(){const c=$('#oport');const os=(st.vista==='radar'&&!souAdm()&&!st.aberto)?oportunidades().filter(o=>!st.opFechada.has(o.cidade)).sort((a,b)=>(b.cidade==='Vidal Ramos')-(a.cidade==='Vidal Ramos')):[];if(!os.length){c.hidden=true;c.innerHTML='';return;}c.hidden=false;c.innerHTML=cartaoOp(os[0],true);}
+function passoOp(cid,d){const o=oportunidades().find(x=>x.cidade===cid);if(!o)return;st.opN[cid]=Math.max(1,Math.min(o.itens.length,(st.opN[cid]||o.itens.length)+d));if($('#modal'))modalAvisos();pintarOport();}
+function fecharOp(cid){st.opFechada.add(cid);if($('#modal'))modalAvisos();pintar();}
+function aceitarOp(cid){const o=oportunidades().find(x=>x.cidade===cid);if(!o||souAdm())return;const n=Math.min(st.opN[cid]||o.itens.length,o.itens.length),ids=o.itens.slice(0,n);
+  ids.forEach(l=>{gr(l).forEach(y=>y.dono=st.eu.id);contar('pegos');if(!st.rota.includes(l.id))st.rota.push(l.id);});st.viagens.unshift({quem:st.eu.id,cidade:cid,n,t:Date.now()});st.opFechada.add(cid);st.vista='radar';fecharModal();pintar();
+  if(mapa)mapa.fitBounds(ids.map(l=>[l.lat,l.lng]),{padding:[90,90],maxZoom:15});modalRota();toast(n+' AF de '+cid+' agora são seus.');}
+function notificar(para,titulo,txt,alvo){st.notifs.unshift({id:'N'+Date.now()+Math.random().toString(36).slice(2,5),para,titulo,txt:txt||'',alvo:alvo||null,t:Date.now(),lida:new Set()});}
+const minhasNotifs=()=>st.notifs.filter(n=>n.para==='todos'||n.para===st.eu.id);
+const retDate=o=>o.retorno?Date.parse(o.retorno.length===7?o.retorno+'-01T12:00:00':o.retorno+'T12:00:00'):null;
+const fmtRet=o=>{const d=new Date(retDate(o));return d.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});};
+const retornosPerto=()=>obras.filter(o=>o.dono===st.eu.id&&o.retorno&&retDate(o)-Date.now()<=15*D&&retDate(o)-Date.now()>-30*D);
+const pedidosAbertos=()=>pedidos.filter(p=>p.st==='aberto');
+function qtdNotif(){if(!st.eu)return 0;return minhasNotifs().filter(n=>!n.lida.has(st.eu.id)).length+retornosPerto().length+oportunidades().length+(souAdm()?pedidosAbertos().length+emRevisao().length:0);}
+function abrirOp(c){st.opAberta=st.opAberta===c?null:c;modalAvisos();}
+function modalAvisosBase(){const ns=minhasNotifs(),os=oportunidades(),v=st.viagens.filter(x=>chaveDia(x.t)===chaveDia(Date.now())),rs=retornosPerto(),hs=st.hits.filter(h=>souAdm()||achaProt(h.prot).dono===st.eu.id),ab=souAdm()?pedidosAbertos():[],rv=souAdm()?emRevisao():[];
+  abrirModal(`<h3>Notificações</h3>
+  ${ab.length||rv.length?`<div class="pilha" id="n-adm">${ab.length?`<button class="notif nova" onclick="fecharModal();st.vista='comando';st.cmd='conflitos';pintar()"><b>${ab.length} pedido(s) aguardando você</b><span class="pq apagado">Cadastros de clientes, autorizações e conflitos</span></button>`:''}${rv.length?`<button class="notif nova" onclick="fecharModal();st.vista='comando';st.cmd='protegidos';pintar()"><b>${rv.length} cliente(s) para revisar</b><span class="pq apagado">Sem visita ou com retorno vencido</span></button>`:''}</div>`:''}
+  ${rs.length?`<div class="pilha" id="n-retornos"><div class="secao">Retornos</div>${rs.map(o=>`<button class="notif nova" onclick="fecharModal();abrir('${o.id}',true)"><b>Retornar para ${esc(o.nome)}</b><span class="pq apagado">${esc(o.cidade)} · previsto para ${fmtRet(o)}</span></button>`).join('')}</div>`:''}
+  <div class="pilha" id="n-msgs">${ns.length?'<div class="secao">Mensagens</div>':''}${ns.map(n=>{const nova=!n.lida.has(st.eu.id);n.lida.add(st.eu.id);return `<button class="notif ${nova?'nova':''}" ${n.alvo?`onclick="fecharModal();abrir('${n.alvo}',true)"`:''}><b>${esc(n.titulo)}</b>${n.txt?`<span class="pq">${esc(n.txt)}</span>`:''}<span class="pq apagado">${haQuanto(n.t)}</span></button>`;}).join('')}</div>
+  <div class="pilha" id="lista-avisos"><div class="secao">Oportunidades</div><p class="pq apagado" style="margin:0">Cidades com ${st.cfg.alertaMin} AF ou mais vencendo em até ${st.cfg.alertaDias} dias.</p>${os.map(o=>st.opAberta===o.cidade?`<div class="op-lista">${cartaoOp(o,!souAdm())}</div>`:`<button class="op-linha" data-oplin="${esc(o.cidade)}" onclick="abrirOp('${esc(o.cidade)}')"><b>${esc(o.cidade)}</b><span class="esp"></span><span class="pq">${o.itens.length} AF · vence ${quando(o.itens[0].prazo)}</span></button>`).join('')||'<div class="bloco apagado">Nenhuma cidade atingiu o mínimo agora.</div>'}</div>
+  ${hs.length?`<div class="bloco pq" id="avisos-prot"><div class="t">Registros dos seus clientes protegidos</div>${hs.map(h=>{const x=achar(h.id);return `<div><button style="all:unset;cursor:pointer;text-decoration:underline" onclick="fecharModal();abrir('${h.id}',true)">${esc(achaProt(h.prot).nome)}</button> · ${resumoG(x)} · ${esc(x.cidade)}</div>`;}).join('')}</div>`:''}
+  ${v.length?`<div class="bloco pq"><div class="t">Hoje</div>${v.map(x=>`<div>${esc(conta(x.quem).nome)} pegou ${x.n} em ${esc(x.cidade)}</div>`).join('')}</div>`:''}`,true);if(st.vista&&$('#topo'))pintarTopo();}
+function modalMsg(){abrirModal(`<h3>Enviar mensagem</h3><div class="erro" id="m-erro" hidden></div><label class="c">Para<select class="inp" id="msg-para"><option value="todos">Todos os vendedores</option>${vendedores().filter(v=>!v.bloq).map(v=>`<option value="${v.id}">${esc(v.nome)}</option>`).join('')}</select></label><label class="c">Mensagem<textarea class="inp" id="msg-txt" rows="3"></textarea></label><div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="msg-ok" style="background:#fff;color:#111" onclick="enviarMsg()">Enviar</button></div>`);}
+function enviarMsg(){const t=$('#msg-txt').value.trim();if(!t){const e=$('#m-erro');e.textContent='Escreva a mensagem.';e.hidden=false;return;}notificar($('#msg-para').value,'Mensagem do administrador',t);fecharModal();toast('Mensagem enviada.');pintar();}
+function pintarTopo(){const h=(Date.now()-st.coleta)/H,nf=filtrosAtivos();
+  $('#topo').innerHTML=`<div class="marca"><svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><circle cx="15" cy="15" r="13" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15" r="7" stroke="#fff" stroke-width="2"/><path d="M15 15 25 6" stroke="#FFC400" stroke-width="3" stroke-linecap="round"/><circle cx="21" cy="19" r="2.600" fill="#EE1638"/></svg><span>Radar<small>EDIFICAÇÕES · SC</small></span></div>
+  <span class="esp"></span><span class="etq so-pc"><i class="dot ${h>6?'alerta':''}"></i>Atualizado ${haQuanto(st.coleta)}</span>
+  ${st.vista==='radar'||st.vista==='fila'?`<button class="etq" id="b-filtros" onclick="modalFiltros()">Filtrar${nf?` <span class="num-badge">${nf}</span>`:''}</button>`:''}
+  <button class="etq" id="b-avisos" aria-label="Notificações" onclick="modalAvisos()"><svg class="sino" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>${qtdNotif()?`<span class="num-badge" style="background:var(--af)">${qtdNotif()}</span>`:''}</button>
+  <button class="etq so-pc" id="b-som" onclick="st.som=!st.som;if(st.som)ding();pintarTopo()">${st.som?'Som ligado':'Ligar som'}</button>
+  <button class="etq" id="b-sair" onclick="sair()">${esc(st.eu.nome)} · Sair</button>`;}
+function pintarDoca(){const pend=pedidos.filter(p=>p.st==='aberto').length,novos=leads.filter(ehNovo).length;
+  const b=(v,t,ic,n)=>`<button class="${st.vista===v?'on':''}" data-v="${v}" aria-current="${st.vista===v?'page':'false'}" onclick="ir('${v}')">${svg(ic)}${t}${n?`<span class="num-badge">${n}</span>`:''}</button>`;
+  $('#doca').innerHTML=b('radar','Radar','radar',novos)+b('fila','Fila','fila')+b('carteira','Carteira','cart')+b('territorio','Território','terr')+(souAdm()?b('comando','Comando','cmd',pend):'');}
+function pintarSinais(){const n=t=>leads.filter(l=>l.tipo===t&&passaFiltro(l)).length,novos=t=>leads.filter(l=>l.tipo===t&&ehNovo(l)&&passaFiltro(l)).length;
+  $('#sinais').innerHTML=['MUL','AF','PRO'].map(t=>`<button class="sinal ${t} ${st.tipos.has(t)?'':'desligado'}" data-t="${t}" aria-pressed="${st.tipos.has(t)}" onclick="alternarTipo('${t}')"><b>${n(t)}</b><span>${TIPO[t].g}</span>${novos(t)?`<small>+${novos(t)} em 24 h</small>`:''}</button>`).join('')+
+  `<button class="sinal compacto ${st.campo?'on':''}" id="b-campo" aria-pressed="${st.campo}" onclick="st.campo=!st.campo;pintar()"><span>Obras de campo no mapa</span></button>`;}
+function alternarTipo(t){st.tipos.has(t)?st.tipos.delete(t):st.tipos.add(t);pintar();}
+function pintarTicker(){const r=[...leads].sort((a,b)=>b.det-a.det).slice(0,14),it=r.map(l=>`<button onclick="abrir('${l.id}',true)"><i class="${l.tipo}">${TIPO[l.tipo].g}</i>${esc(l.nome)} · ${esc(l.cidade)} · ${haQuanto(l.det)}</button>`).join('');
+  $('#ticker').innerHTML=`<span class="rot">AO VIVO</span><div style="overflow:hidden;flex:1"><div class="faixa">${it}${it}</div></div>`;}
+function filtrosAtivos(){const f=st.f;return (f.texto?1:0)+f.cidades.size+(f.areaMin||f.areaMax?1:0)+f.exig.size+(f.dono?1:0)+(f.soNovos?1:0);}
+function modalFiltros(){const f=st.f,donos=[['','Todos'],['__sem','Sem dono'],...(souAdm()?vendedores().filter(c=>!c.bloq).map(c=>[c.id,c.nome]):[[st.eu.id,'Meus']])];abrirModal(`<h3>Filtrar</h3>
+  <label class="c">Buscar<input class="inp" id="f-texto" placeholder="Nome, código ou endereço" value="${esc(f.texto)}"></label>
+  <div class="c pq apagado">Exigência</div><div class="chips" id="f-exig">${Object.keys(TAGS).map(k=>`<button type="button" class="chip ${f.exig.has(k)?'on':''}" data-k="${esc(k)}" onclick="this.classList.toggle('on')">${esc(k)}</button>`).join('')}</div>
+  <div class="c pq apagado">Metragem</div><div class="chips" id="f-fx">${FAIXAS.map(([a,b,t])=>`<button type="button" class="chip fx-chip ${f.areaMin===a&&f.areaMax===b?'on':''}" data-a="${a}" data-b="${b}" onclick="f_fx(this)">${t}</button>`).join('')}</div>
+  <label class="c">Ou digite a área mínima (m²)<input class="inp" id="f-area" type="number" min="0" step="100" inputmode="numeric" value="${f.areaMin&&!FAIXAS.some(x=>x[0]===f.areaMin&&x[1]===f.areaMax)?f.areaMin:''}" oninput="$$('#f-fx .on').forEach(b=>b.classList.remove('on'))"></label>
+  <div class="c pq apagado">Dono</div><div class="seg" id="f-dono">${donos.map(([k,t])=>`<button type="button" data-k="${k}" class="${f.dono===k?'on':''}" onclick="f_dono(this)">${esc(t)}</button>`).join('')}</div>
+  <div class="c pq apagado">Cidade</div><div class="chips" id="f-cid">${NC.map(c=>`<button type="button" class="chip ${f.cidades.has(c)?'on':''}" data-c="${esc(c)}" onclick="this.classList.toggle('on')">${esc(c)}</button>`).join('')}</div>
+  <label class="linha pq"><input type="checkbox" id="f-novos" ${f.soNovos?'checked':''}> Só novos nas últimas 24 h</label>
+  <div class="fim"><button class="btn" onclick="limparFiltros();fecharModal();pintar()">Limpar</button><button class="btn" style="background:#fff;color:#111" id="f-ok" onclick="aplicarFiltros()">Aplicar</button></div>`);}
+function f_fx(b){const era=b.classList.contains('on');$$('#f-fx .on').forEach(x=>x.classList.remove('on'));if(!era){b.classList.add('on');$('#f-area').value='';}}
+function f_dono(b){$$('#f-dono button').forEach(x=>x.classList.toggle('on',x===b));}
+function aplicarFiltros(){const f=st.f,fx=$('#f-fx .on');f.texto=$('#f-texto').value.trim();f.areaMin=fx?+fx.dataset.a:(+$('#f-area').value||0);f.areaMax=fx?+fx.dataset.b:0;f.exig=new Set($$('#f-exig .on').map(b=>b.dataset.k));f.dono=($('#f-dono .on')||{dataset:{k:''}}).dataset.k;f.cidades=new Set($$('#f-cid .on').map(b=>b.dataset.c));f.soNovos=$('#f-novos').checked;fecharModal();pintar();}
+function limparFiltros(){st.f={texto:'',cidades:new Set(),areaMin:0,areaMax:0,exig:new Set(),dono:'',soNovos:false};}
+
+/* ========== dossiê ========== */
+function abrir(id,voar){st.aberto=id;st.marcando=null;const x=achar(id);if(x&&x.tipo!=='CAMPO')contar('abertos');pintarGaveta();$('#gaveta').scrollTop=0;pintarMapa();pintarOport();if(voar&&mapa&&x)mapa.flyTo([x.lat,x.lng],15,{duration:.8});}
+function fecharGaveta(){st.aberto=null;st.marcando=null;desenharPino();pintarGaveta();pintarMapa();pintarOport();if(st.vista==='territorio')pintarTerr();}
+const FECHA='<button class="fecha" aria-label="Fechar" onclick="fecharGaveta()">×</button>';
+function pintarGaveta(){const g=$('#gaveta');
+  g.classList.toggle('marc',!!st.marcando);
+  if(st.marcando){g.hidden=false;g.innerHTML=FECHA+formMarcar();atualizarChecagem();return;}
+  const x=st.aberto&&achar(st.aberto);if(!x){g.hidden=true;g.innerHTML='';return;}
+  g.hidden=false;g.innerHTML=FECHA+(x.tipo==='CAMPO'?dossieObra(x):dossieLead(x));}
+const donoHtml=id=>{const c=conta(id);return c?`<span class="dono"><i style="background:${c.cor}">${c.l}</i>${esc(c.nome)}</span>`:'';};
+function corpoLead(l){const g=grupo(l),au=g.filter(x=>x.tipo!=='PRO'),pr=g.filter(x=>x.tipo==='PRO'),bl=[],et=etapa(l);
+  if(et)bl.push(`<div class="etapa ${et.k}" id="b-etapa"><b>${ETAPA[et.k][0]}</b><div class="pq" style="margin-top:4px">${ETAPA[et.k][1]} Protocolo de ${fmtData(et.pro.data)}. Este lead continua ativo.</div></div>`);
+  if(au.length){const pz=au.map(prazoEf).filter(x=>x!=null),fut=pz.filter(x=>x>=0),p=fut.length?Math.min(...fut):pz.length?Math.max(...pz):null,ex=[...new Set(au.flatMap(x=>x.exig||[]))],feita=e=>PROJ.test(e)&&au.some(x=>cobre(x)&&(x.exig||[]).includes(e));
+    const reais=au.filter(x=>x.pendReal),pd=reais.length?reais:au.filter(x=>x.pend&&x.pend.length);
+    if(pd.length)bl.push(`<div class="pedido" id="b-pedido"><div class="linha"><span class="t2">O QUE O BOMBEIRO PEDIU</span><span class="esp"></span><span class="selo vai" id="selo-pedido">${reais.length?'Texto do AF':'Exemplo'}</span></div>${reais.length?reais.map(x=>`<p class="texto-af">${esc(x.pend[0])}</p>${x.emissao?`<div class="pq">AF de ${fmtData(x.emissao)}</div>`:''}`).join(''):`<ul>${[...new Set(pd.flatMap(x=>x.pend))].map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`}</div>`);
+    if(p==null&&!ex.length)bl.push(`<div class="bloco pq apagado" data-sem-detalhe>Sem exigências e prazo registrados.</div>`);
+    if(p!=null)bl.push(`<div class="bloco prazo ${p<=15?'urg':''}"><b>${Math.abs(p)}</b><div><div style="font:800 19px var(--display)">${p<0?'DIAS VENCIDO':'DIAS DE PRAZO'}</div><div class="pq apagado">para corrigir as exigências</div></div></div>`);
+    if(ex.length)bl.push(`<div class="bloco"><div class="t">Exigências</div><div class="exigs">${ex.map(e=>`<span class="${feita(e)?'feita':''}">${esc(e)}</span>`).join('')}</div>${ex.some(feita)?'<div class="pq apagado" style="margin-top:6px">Riscada: em tese atendida pelo protocolo. A confirmar.</div>':''}</div>`);}
+  pr.slice(0,2).forEach(x=>{bl.push(`<div class="bloco"><div class="t">Situação do projeto</div><div style="font:900 30px/1 var(--display);color:${x.sit[1]==='def'?'var(--livre)':x.sit[1]==='ind'?'#FF6078':'var(--af)'}">${esc(x.sit[0]).toUpperCase()}</div><div class="pq apagado">${fmtData(x.data||x.det)}${x.anexos?' · '+x.anexos+' anexo(s) no e-SCI':''}</div></div>`);});
+  return bl.join('');}
+function dataReg(x){if(x.tipo==='PRO')return x.data?'protocolado em '+fmtData(x.data):'detectado em '+fmtData(x.det);return x.emissao?'gerado em '+fmtData(x.emissao):'detectado em '+fmtData(x.det);}
+function blocoMesmaRE(l){const g=grupo(l);return `<div class="bloco pq" id="b-mesma-re"><div class="t">${g.length>1?'Nesta edificação ('+g.length+' registros)':'Registro'}</div>${g.map(x=>`<div style="margin-bottom:3px"><span class="mono">${esc(x.id)}</span><br><span class="apagado">${TIPO[x.tipo].g} · ${dataReg(x)}</span></div>`).join('')}${g.length>1?'<div class="apagado" style="margin-top:4px">Quem pega leva todos os registros.</div>':''}</div>`;}
+function dossieLeadBase(l){const meu=l.dono===st.eu.id,pode=meu||souAdm(),cf=checar(l,l.dono||st.eu.id),naRota=st.rota.includes(l.id);
+  return `<div class="capa ${simbolo(l)}"><h2>${TIPO[simbolo(l)].g}</h2><div class="sub">${subG(l)}${ehNovo(l)?' · NOVO':''}</div></div>
+  <div class="miolo"><div class="pilha" style="gap:4px"><h3>${esc(l.nome)}</h3><div>${esc(l.rua)}, ${l.num} · ${esc(l.bairro)} · ${esc(l.cidade)}</div><div class="linha pq apagado"><span class="mono">${l.id}</span><span>${area(areaG(l))}</span>${pontoTxt(l)?`<span id="ponto-txt">${pontoTxt(l)}</span>`:''}</div></div>
+  ${blocoProt(l)}${blocoPend(l)}${cf.length?`<div class="alerta-terr" id="alerta-terr"><b>${esc(conta(cf[0].o.dono).nome)} já trabalha aqui perto</b><span class="pq">${esc(cf[0].o.nome)}, ${cf[0].mot.join(', ')}. Última visita ${haQuanto(cf[0].o.ultVisita)}.</span></div>`:''}
+  ${blocoMesmaRE(l)}${corpoLead(l)}
+  ${l.dono?`<div class="bloco"><div class="t">Dono</div>${donoHtml(l.dono)}${l.obs&&pode?`<div class="pq" style="margin-top:6px">${esc(l.obs)}</div>`:''}</div>`:''}
+  ${blocoVisitas(l,pode)}${blocoVenda(l)}
+  ${l.dono&&pode?`<div class="bloco"><div class="t">Situação</div><div class="seg" id="seg-stat">${STAT.map(([k,t])=>`<button class="${l.status===k?'on':''}" onclick="marcar('${l.id}','${k}')">${t}</button>`).join('')}</div></div>`:''}
+  <div class="pilha">${!l.dono?`<button class="btn forte" id="b-pegar" onclick="pegar('${l.id}')">PEGAR ESTE LEAD</button>${souAdm()?'':`<button class="btn" id="b-pegar-prova" onclick="modalVisita('${l.id}',true)">Estou na obra: pegar com visita comprovada</button>`}`:''}
+   ${l.dono&&meu?`<button class="btn forte" id="b-visita" onclick="modalVisita('${l.id}')">REGISTRAR VISITA</button>`:''}
+   <div class="linha">${l.dono&&pode?`<button class="btn" onclick="soltar('${l.id}')">Soltar</button><button class="btn" onclick="editarObs('${l.id}')">Observação</button>`:''}
+   ${souAdm()?`<button class="btn" id="b-passar" onclick="modalAtribuir('${l.id}')">Passar para</button><button class="btn" id="b-prot" onclick="modalProt(achar('${l.id}').nome)">Proteger cliente</button>`:''}<button class="btn" onclick="alternarRota('${l.id}')">${naRota?'Tirar da rota':'Pôr na rota'}</button><button class="btn" onclick="abrirESci('${l.id}')">Abrir no e-SCI</button></div></div></div>`;}
+function blocoFid(o){const f=o.status==='fechado',rv=precisaRevisar(o);return `<div class="bloco" id="b-fid"><div class="t">${f?'Cliente fechado':'Cliente fidelizado'}</div>${o.retorno?`<div style="font:800 21px var(--display)">Retorno em ${fmtRet(o)}</div>`:''}<div class="pq apagado">Última visita ${haQuanto(o.ultVisita)} · desde ${fmtData(o.desde)}${o.area?' · '+area(o.area):''}${o.re?' · RE '+esc(o.re):''}</div>${o.doc?`<div class="pq apagado">Documento: <span class="mono">${esc(o.doc)}</span></div>`:''}${o.re?`<div class="pq" id="b-monitor" style="margin-top:6px;color:var(--livre)">Monitorando ${esc(o.re)}. Última conferência ${haQuanto(o.conferido||AGORA-3*H)}. Registro novo vira notificação.</div>`:''}${rv?'<div class="pq" style="color:var(--af);margin-top:4px">Na lista de revisão do administrador.</div>':''}</div>`;}
+function removerCliente(o,avisar){const pi=protegidos.findIndex(x=>x.fid===o.id);if(pi>=0)protegidos.splice(pi,1);const i=obras.indexOf(o);if(i>=0)obras.splice(i,1);aplicarProtegidos();if(avisar)notificar(o.dono,'Cliente liberado',o.nome+' · '+o.cidade);}
+function manterCliente(id){const o=achar(id);o.ultVisita=Date.now();if(o.retorno&&retDate(o)<Date.now())o.retorno='';toast('Cliente mantido com '+conta(o.dono).nome+'.');pintar();}
+function liberarCliente(id){removerCliente(achar(id),true);toast('Cliente liberado.');pintar();}
+function blocoRevisao(){const r=emRevisao();if(!r.length)return '';return `<div class="pilha" id="lista-revisao" style="margin-bottom:14px"><div class="secao">Para revisar (${r.length})</div>${r.map(o=>`<article class="conflito" data-rev="${o.id}"><div class="linha"><b>${esc(o.nome)}</b><span class="esp"></span>${donoHtml(o.dono)}</div><div class="pq apagado">${esc(o.cidade)} · ${o.retorno?'retorno previsto para '+fmtRet(o)+' já passou':'última visita '+haQuanto(o.ultVisita)}</div><div class="linha"><button class="btn pq" onclick="abrir('${o.id}')">Ver</button><button class="btn pq" data-acao="mantem" onclick="manterCliente('${o.id}')">Manter</button><button class="btn pq perigo" data-acao="libera" onclick="liberarCliente('${o.id}')">Liberar</button></div></article>`).join('')}</div>`;}
+function dossieObra(o){const d=conta(o.dono),meu=o.dono===st.eu.id,pode=meu||souAdm(),at=obraAtiva(o),rest=diasReserva(o),naRota=st.rota.includes(o.id);
+  return `<div class="capa CAMPO" style="--cor-dono:${at?d.cor:'#536170'}"><h2>${at?'FIDELIZADO':'LIVRE'}</h2><div class="sub">${at?'Cliente de '+esc(d.nome):'Liberado'}</div></div>
+  <div class="miolo"><div class="pilha" style="gap:4px"><h3>${esc(o.nome)}</h3><div>${esc(o.rua)}, ${o.num} · ${esc(o.cidade)}</div></div>
+  ${pode?`${blocoFid(o)}`:`<div class="bloco" id="so-quem"><div class="t">Situação</div><div>Marcada em ${fmtData(o.desde)}</div><div class="pq apagado">Última visita ${haQuanto(o.ultVisita)}</div></div>`}
+  ${blocoVisitas(o,pode)}${blocoVenda(o)}
+  ${pode?`<div class="bloco"><div class="t">Situação</div><div class="seg" id="seg-stat">${STAT.map(([k,t])=>`<button class="${o.status===k?'on':''}" onclick="marcar('${o.id}','${k}')">${t}</button>`).join('')}</div></div>
+   ${o.obs?`<div class="bloco"><div class="t">Observação privada</div><div class="pq">${esc(o.obs)}</div></div>`:''}`:`<div class="bloco pq apagado" id="so-dono">Situação da negociação e observações só o dono e o administrador veem.</div>`}
+  <div class="linha">${pode?`<button class="btn forte" id="b-visita" onclick="modalVisita('${o.id}')">REGISTRAR VISITA</button><button class="btn" onclick="editarObs('${o.id}')">Observação</button><button class="btn" onclick="soltarObra('${o.id}')">Liberar cliente</button>`:''}
+  ${souAdm()?`<button class="btn" id="b-passar" onclick="modalAtribuir('${o.id}')">Passar para</button><button class="btn" id="b-prot" onclick="modalProt(achar('${o.id}').nome,'${o.dono}')">Proteger cliente</button>`:''}<button class="btn" onclick="alternarRota('${o.id}')">${naRota?'Tirar da rota':'Pôr na rota'}</button></div></div>`;}
+
+/* ========== ações ========== */
+function pegar(id){const l=achar(id);if(l.dono)return toast('Este lead já tem dono.');
+  if(souAdm())return modalAtribuir(id);
+  const cf=checar(l,st.eu.id);
+  if(cf.length)return abrirModal(`<h3>Obra de ${esc(conta(cf[0].o.dono).nome)} aqui perto</h3><p style="margin:0">${esc(cf[0].o.nome)}, ${cf[0].mot.join(', ')}. O administrador decide quem fica. Pedir com visita comprovada dá mais força ao pedido.</p>
+    <div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="m-prova" onclick="modalVisita('${id}',true)">Estou na obra: comprovar</button><button class="btn" id="m-pedir" style="background:#fff;color:#111" onclick="pedirLead('${id}','${cf[0].o.id}')">Pedir ao administrador</button></div>`);
+  gr(l).forEach(x=>x.dono=st.eu.id);contar('pegos');toast(grupo(l).length>1?'Edificação é sua: '+resumoG(l)+'.':'Lead é seu.');pintar();}
+function pedirLead(id,oid){pedidos.push({id:'P'+(seqPed++),tipo:'lead',quem:st.eu.id,alvo:oid,lead:id,quando:Date.now(),st:'aberto'});fecharModal();toast('Pedido enviado ao administrador.');pintar();}
+function modalAtribuir(id){const l=achar(id),cf=checar(l,null);abrirModal(`<h3>Atribuir lead</h3><p class="apagado pq" style="margin:0">${esc(l.nome)}</p>${cf.length?`<div class="alerta-terr pq">Atenção: ${esc(conta(cf[0].o.dono).nome)} tem obra ${cf[0].mot.join(', ')}.</div>`:''}
+  <label class="c">Vendedor<select class="inp" id="m-v">${contas.filter(v=>!v.bloq).map(v=>`<option value="${v.id}">${esc(v.nome)}</option>`).join('')}</select></label>
+  <div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="m-ok" style="background:#fff;color:#111" onclick="atribuir('${id}')">Atribuir</button></div>`);}
+function atribuir(id){const l=achar(id),nv=$('#m-v').value,ant=l.dono;gr(l).forEach(x=>{x.dono=nv;x.liberado=!!x.prot;});if(ant&&ant!==nv&&ant!=='adm')notificar(ant,'Lead removido da sua carteira',l.nome+' · '+l.cidade);if(nv!=='adm')notificar(nv,'Novo lead direcionado para você',l.nome+' · '+l.cidade,l.id);fecharModal();toast('Atribuído a '+conta(l.dono).nome+'.');pintar();}
+function soltar(id){const l=achar(id);if(l.dono!==st.eu.id&&!souAdm())return toast('Só o dono ou o administrador pode soltar.');if(souAdm()&&l.dono&&l.dono!==st.eu.id)notificar(l.dono,'Lead removido da sua carteira',l.nome+' · '+l.cidade);gr(l).forEach(x=>{x.dono=null;x.status='novo';x.obs='';x.liberado=!!x.prot;});toast('Voltou para a fila.');pintar();}
+function marcar(id,s){const x=achar(id);if(x.dono!==st.eu.id&&!souAdm())return;gr(x).forEach(y=>y.status=s);contar('marcados');pintar();}
+function editarObs(id){const x=achar(id);if(x.dono!==st.eu.id&&!souAdm())return;abrirModal(`<h3>Observação</h3><p class="apagado pq" style="margin:0">${esc(x.nome)}. Só o dono e o administrador leem.</p><textarea class="inp" id="m-obs" rows="4">${esc(x.obs)}</textarea><div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="m-ok" style="background:#fff;color:#111" onclick="salvarObs('${id}')">Salvar</button></div>`);}
+function salvarObs(id){const v=$('#m-obs').value.trim();gr(achar(id)).forEach(y=>y.obs=v);fecharModal();pintar();}
+function abrirESci(id){try{navigator.clipboard&&navigator.clipboard.writeText(id).catch(()=>{});}catch(e){}contar('abertos');toast('Esboço: código '+id+' copiado; abriria o e-SCI.');}
+function alternarRota(id){const i=st.rota.indexOf(id);i>=0?st.rota.splice(i,1):st.rota.push(id);pintar();}
+function modalVisita(id,pegando){const x=achar(id);abrirModal(`<h3>${pegando?'Pegar com visita comprovada':'Registrar visita'}</h3><p class="apagado pq" style="margin:0">${esc(x.nome)}</p>
+  <p style="margin:0" id="v-aviso">Vamos usar o GPS do celular para confirmar a visita.<button class="info" id="v-i" aria-label="Mais informações" onclick="$('#v-info').hidden=!$('#v-info').hidden">i</button></p><div class="bloco pq" id="v-info" hidden>A posição é lida uma única vez, neste toque, para comparar com o endereço da obra. O local não fica guardado e ninguém acompanha onde você está. Ficam registrados só a data, a hora e a distância até a obra.</div>
+  <div id="v-res"></div><div class="pilha"><button class="btn forte" id="v-perto" onclick="confirmarVisita('${id}',35,${!!pegando})">ESTOU NA OBRA</button>
+  <button class="btn" id="v-longe" onclick="confirmarVisita('${id}',4200,${!!pegando})">Teste: simular que estou longe</button>
+  ${pegando?'':`<button class="btn" id="v-sem" onclick="confirmarVisita('${id}',null,false)">Registrar sem GPS</button>`}</div>
+  <div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button></div>`);}
+function confirmarVisita(id,m,pegando){const x=achar(id);
+  if(m!=null&&m>st.cfg.prova){$('#v-res').innerHTML=`<div class="erro" id="v-erro">Você está a ${(m/1000).toLocaleString('pt-BR')} km da obra, e o limite é de ${st.cfg.prova} m. A visita não foi comprovada.</div>`;return;}
+  const prova=m!=null,v={t:Date.now(),prova,m};
+  if(pegando){const cf=checar(x,st.eu.id);
+    if(cf.length){pedidos.push({id:'P'+(seqPed++),tipo:'lead',quem:st.eu.id,alvo:cf[0].o.id,lead:id,prova:{m},quando:Date.now(),st:'aberto'});contar('comprovadas');fecharModal();toast('Pedido enviado com visita comprovada.');return pintar();}
+    gr(x).forEach(y=>y.dono=st.eu.id);contar('pegos');}
+  else if(x.dono!==st.eu.id&&!souAdm())return;
+  x.visitas.push(v);if(x.tipo==='CAMPO')x.ultVisita=v.t;contar('visitas');if(prova)contar('comprovadas');fecharModal();
+  toast(prova?'Visita comprovada a '+m+' m.':'Visita registrada sem comprovação.');pintar();}
+function blocoVenda(x){if(!souAdm()||x.status!=='fechado')return '';return `<div class="bloco" id="b-venda"><div class="t">O que foi vendido (só você vê)</div><div class="chips">${VENDAS.map(k=>`<button class="chip ${x.vendido.includes(k)?'on':''}" onclick="alternarVenda('${x.id}','${k}')">${k}</button>`).join('')}</div></div>`;}
+function alternarVenda(id,k){if(!souAdm())return;const x=achar(id),i=x.vendido.indexOf(k);i>=0?x.vendido.splice(i,1):x.vendido.push(k);pintar();}
+function blocoVisitas(x,pode){const vs=[...(x.visitas||[])].reverse();if(!vs.length)return '';const n=vs.filter(v=>v.prova).length,u=ultProva(x);
+  return `<div class="bloco" id="b-visitas"><div class="t">Visitas</div><div class="linha" style="margin-bottom:5px"><span class="selo ${n?'ok':'foi'}">${n?n+' comprovada(s)':'Nenhuma comprovada'}</span>${pode?'':(u?`<span class="pq apagado">Última comprovada ${haQuanto(u.t)}</span>`:'')}</div>${pode?vs.slice(0,3).map(v=>`<div class="pq">${haQuanto(v.t)} · ${v.prova?'Comprovada a '+v.m+' m':'Sem comprovação'}</div>`).join(''):''}</div>`;}
+function soltarObra(id){const o=achar(id);if(o.dono!==st.eu.id&&!souAdm())return;removerCliente(o,souAdm()&&o.dono!==st.eu.id);st.aberto=null;toast('Obra liberada.');pintar();}
+
+/* ========== clientes protegidos ========== */
+function novoProt(d){const p=Object.assign({id:'CP'+(seqProt++),nome:'',termos:[],doc:'',res:[],dono:'adm',desde:Date.now()},d);protegidos.push(p);return p;}
+const temTermo=(txt,t)=>norm(t).length>=3&&(' '+norm(txt)+' ').includes(' '+norm(t)+' ');
+const protDe=l=>protegidos.find(p=>(l.re&&p.res.includes(l.re))||p.termos.some(t=>temTermo(l.nome,t)));
+const achaProt=id=>protegidos.find(p=>p.id===id);
+function aplicarProtegidos(){st.hits=[];unicos(leads).forEach(l=>{const p=gr(l).map(protDe).find(Boolean);gr(l).forEach(x=>{x.prot=p?p.id:null;if(p&&!x.liberado)x.dono=p.dono;});if(p)st.hits.push({prot:p.id,id:l.id});});}
+function docBate(doc,dg){const d=(doc||'').replace(/\D/g,'');if(!d||dg.length<8)return false;return d.length===14?d.slice(0,8)===dg.slice(0,8):d===dg;}
+function buscaProt(q){const dg=String(q||'').replace(/\D/g,''),n=norm(q);return protegidos.find(p=>p.termos.some(t=>temTermo(q,t))||(n.length>=4&&norm(p.nome).includes(n))||docBate(p.doc,dg));}
+const barrado=p=>p&&!souAdm()&&p.dono!==st.eu.id;
+function blocoProt(l){const p=achaProt(l.prot);if(!p)return '';if(l.liberado)return `<div class="alerta-terr prot pq" id="alerta-prot"><b>LIBERADO</b>O administrador autorizou ${esc(conta(l.dono)?conta(l.dono).nome:'')} neste cliente protegido.</div>`;
+  const ja=pedidos.some(x=>x.tipo==='prot'&&x.lead===l.id&&x.quem===st.eu.id&&x.st==='aberto');
+  return `<div class="alerta-terr prot" id="alerta-prot"><b>CLIENTE PROTEGIDO</b><span class="pq">${esc(p.nome)} é de ${esc(conta(p.dono).nome)}. Só entra com autorização do administrador.</span>${barrado(p)?`<div style="margin-top:8px">${ja?'<span class="pq apagado">Pedido enviado. Aguarde a decisão.</span>':`<button class="btn pq" id="b-pedir-prot" onclick="pedirProt('${p.id}','${l.id}')">Pedir autorização</button>`}</div>`:''}</div>`;}
+function pedirProt(pid,lid,nova){pedidos.push({id:'P'+(seqPed++),tipo:'prot',quem:st.eu.id,prot:pid,lead:lid||null,nova:nova||null,quando:Date.now(),st:'aberto'});toast('Pedido enviado ao administrador.');pintar();}
+function nomePedido(p){return p.lead?achar(p.lead).nome:p.nova?p.nova.nome:p.tipo==='prot'?achaProt(p.prot).nome:'';}
+function cartaProt(p){const c=achaProt(p.prot),q=conta(p.quem);return `<article class="conflito" data-p="${p.id}" data-prot-ped><h3>${esc(nomePedido(p))}</h3><div class="pq">${esc(q.nome)} pediu autorização ${haQuanto(p.quando)}. Cliente protegido de ${esc(c?conta(c.dono).nome:'')}.</div><div class="linha"><button class="btn" data-acao="nega" onclick="decidir('${p.id}','nega')">Negar</button><button class="btn" data-acao="autoriza" style="background:#fff;color:#111" onclick="decidir('${p.id}','autoriza')">Autorizar ${esc(q.nome)}</button></div></article>`;}
+function cmdProt(){$('#cmd').innerHTML=`<div class="linha" style="margin-bottom:12px"><span class="pq apagado">Todos veem que o cliente tem dono. Documento e termos de busca só você vê.</span><span class="esp"></span><button class="btn pq" id="b-novo-prot" style="background:#fff;color:#111" onclick="modalProt()">Novo cliente protegido</button></div>
+  ${blocoRevisao()}<div class="secao" style="margin-bottom:8px">Clientes protegidos e fidelizados</div><div class="pilha" id="lista-prot">${protegidos.map(p=>{const hs=st.hits.filter(h=>h.prot===p.id).map(h=>achar(h.id));return `<article class="conflito" data-prot="${p.id}"><div class="linha"><h3>${esc(p.nome)}</h3><span class="esp"></span>${donoHtml(p.dono)}</div><div class="pq apagado">Busca: ${esc(p.termos.join(', '))||'—'}${p.doc?' · Documento: <span class="mono">'+esc(p.doc)+'</span>':''}</div>${p.fid&&achar(p.fid)&&achar(p.fid).retorno?`<div class="pq">Retorno previsto: ${fmtRet(achar(p.fid))}</div>`:''}<div class="pq">${hs.length?hs.length+' edificação(ões) encontrada(s):':'Nenhum registro encontrado.'}</div>${hs.map(h=>`<button style="all:unset;cursor:pointer;text-decoration:underline" class="pq" onclick="st.vista='radar';pintar();abrir('${h.id}',true)">${resumoG(h)} · ${esc(h.nome)} · ${esc(h.cidade)}</button>`).join('')}<div class="linha"><button class="btn pq perigo" onclick="removerProt('${p.id}')">Remover proteção</button>${p.fid&&achar(p.fid)?`<button class="btn pq" onclick="st.vista='radar';pintar();abrir('${p.fid}',true)">Ver cliente</button>`:''}</div></article>`;}).join('')||'<div class="bloco apagado">Nenhum cliente protegido.</div>'}</div>`;}
+function modalProt(nome,dono){abrirModal(`<h3>Cliente protegido</h3><div class="erro" id="m-erro" hidden></div><label class="c">Nome do cliente<input class="inp" id="p-nome" value="${esc(nome||'')}"></label><label class="c">Buscar nos registros por (separe com vírgula)<input class="inp" id="p-termos" value="${esc(nome||'')}"></label><label class="c">CNPJ ou CPF (opcional, só você vê)<input class="inp" id="p-doc" inputmode="numeric" autocomplete="off"></label><label class="c">Vendedor dono<select class="inp" id="p-dono">${contas.filter(c=>!c.bloq).map(c=>`<option value="${c.id}" ${(dono||'adm')===c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select></label><div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="p-ok" style="background:#fff;color:#111" onclick="salvarProt()">Proteger</button></div>`);}
+function salvarProt(){const e=$('#m-erro'),f=t=>{e.textContent=t;e.hidden=false;},n=$('#p-nome').value.trim(),te=$('#p-termos').value.split(',').map(x=>x.trim()).filter(Boolean),dg=$('#p-doc').value.replace(/\D/g,'');
+  if(n.length<3)return f('Informe o nome do cliente.');if(te.some(t=>norm(t).length<3))return f('Cada termo precisa ter pelo menos 3 letras.');if(!te.length&&!dg)return f('Informe um termo de busca ou um documento.');if(dg&&dg.length!==11&&dg.length!==14)return f('CNPJ tem 14 dígitos e CPF tem 11.');
+  novoProt({nome:n,termos:te,doc:dg,dono:$('#p-dono').value});aplicarProtegidos();fecharModal();toast(n+' protegido.');st.vista='comando';st.cmd='protegidos';st.aberto=null;pintar();}
+function removerProt(id){protegidos.splice(protegidos.findIndex(p=>p.id===id),1);leads.forEach(l=>{if(l.prot===id)l.liberado=false;});aplicarProtegidos();toast('Proteção removida. O dono atual continua.');pintar();}
+
+/* ========== rota ========== */
+function linksMaps(it,n){const out=[];for(let i=0;i<it.length;i+=n){out.push('https://www.google.com/maps/dir/'+it.slice(i,i+n).map(l=>encodeURIComponent(`${l.rua} ${l.num}, ${l.cidade}, SC`)).join('/'));}return out;}
+function qrSvg(t){try{if(typeof qrcode==='undefined')throw 0;const q=qrcode(0,'M');q.addData(t);q.make();return q.createSvgTag({cellSize:4,margin:2});}catch(e){return '<div style="color:#111" class="pq">QR indisponível sem internet</div>';}}
+function moverRota(i,d){const a=st.rota,t=a[i];a[i]=a[i+d];a[i+d]=t;modalRota();pintarMapa();}
+function modalRota(){const it=st.rota.map(achar).filter(Boolean),url=(linksMaps(st.rota.map(achar).filter(Boolean),10)[0]||location.href),mp=linksMaps(it,10);
+  abrirModal(`<h3>Rota · ${it.length} parada(s)</h3><div class="qr" id="m-qr">${qrSvg(url)}</div>
+  <div class="tab-wrap"><table id="t-rota"><tr><th>#</th><th>Local</th><th>Endereço</th><th></th></tr>${it.map((p,i)=>`<tr><td>${i+1}</td><td>${esc(p.nome)}</td><td>${esc(p.rua)}, ${p.num} · ${esc(p.cidade)}</td><td class="n" style="white-space:nowrap"><button class="btn pq" ${i?'':'disabled'} onclick="moverRota(${i},-1)">↑</button> <button class="btn pq" ${i<it.length-1?'':'disabled'} onclick="moverRota(${i},1)">↓</button></td></tr>`).join('')}</table></div>
+  <div class="linha">${mp.map((m,i)=>`<a class="btn pq" style="text-decoration:none" target="_blank" rel="noopener" href="${esc(m)}">Abrir no Maps${mp.length>1?' · trecho '+(i+1):''}</a>`).join('')}</div>
+  <div class="fim"><button class="btn" onclick="fecharModal()">Fechar</button><button class="btn" id="m-rel" onclick="relatorio()">Relatório</button></div>`,true);}
+function relatorio(){const it=st.rota.map(achar).filter(Boolean);abrirModal(`<div id="rel" class="pilha"><h3>Relatório de captação</h3><p class="pq" style="margin:0">${fmtData(Date.now())} · ${esc(st.eu.nome)} · ${it.length} parada(s)</p><div class="tab-wrap"><table><tr><th>#</th><th>Local</th><th>Endereço</th><th>Situação</th><th>Observação</th></tr>${it.map((p,i)=>`<tr><td>${i+1}</td><td>${esc(p.nome)}</td><td>${esc(p.rua)}, ${p.num} · ${esc(p.cidade)}</td><td>${p.dono===st.eu.id||souAdm()?nomeStat(p.status):'—'}</td><td>${p.dono===st.eu.id||souAdm()?esc(p.obs):''}</td></tr>`).join('')}</table></div></div>
+  <div class="fim"><button class="btn" onclick="modalRota()">Voltar</button><button class="btn" style="background:#fff;color:#111" onclick="imprimir()">Imprimir ou salvar em PDF</button></div>`,true);}
+function imprimir(){document.body.classList.add('imprimir');window.print();document.body.classList.remove('imprimir');}
+
+/* ========== fila ========== */
+function filaAtual(){return unicos(leads.filter(l=>!l.dono&&st.tipos.has(l.tipo)&&passaFiltro(l)&&!st.pulados.has(l.id)).sort((a,b)=>rankFila(a)-rankFila(b)||((prazoEf(a)==null?9999:Math.abs(prazoEf(a)))-(prazoEf(b)==null?9999:Math.abs(prazoEf(b))))));}
+function rankFila(l){if(ehNovo(l))return 0;const pz=prazoEf(l);if(pz!=null&&pz>=0&&pz<=30)return 1;if(etapa(l)&&etapa(l).k==='executar')return 1.5;return ({MUL:2,AF:3,PRO:4})[l.tipo];}
+function pintarFila(){const q=filaAtual(),m=st.filaModo;
+  const cab=`<div class="linha"><h1 class="titulo">Fila</h1><span class="esp"></span><span class="seg" id="seg-fila"><button class="${m==='cartas'?'on':''}" onclick="st.filaModo='cartas';pintar()">Cartas</button><button class="${m==='lista'?'on':''}" onclick="st.filaModo='lista';pintar()">Lista</button></span></div>
+  <div class="chips" style="margin:6px 0 16px">${['MUL','AF','PRO'].map(t=>`<button class="chip ${st.tipos.has(t)?'on':''}" onclick="alternarTipo('${t}')">${TIPO[t].g}</button>`).join('')}<span class="pq apagado" id="fila-qt" style="align-self:center">${q.length} sem dono</span></div><p class="so-cel pq apagado" style="margin:-8px 0 12px">Arraste a carta para a direita para pegar e para a esquerda para pular.</p>`;
+  if(m==='lista'){$('#painel').innerHTML=`<div class="pagina">${cab}<div class="grade-tick" id="lista">${q.slice(0,60).map(tick).join('')||'<div class="apagado">Nada com esses filtros.</div>'}</div>${q.length>60?`<p class="apagado pq">Mostrando 60 de ${q.length}. Use os filtros para refinar.</p>`:''}</div>`;return;}
+  const[a,b,c]=q;
+  $('#painel').innerHTML=`<div class="pagina">${cab}<div class="mesa"><div>
+   <div class="baralho" id="baralho">${c?`<div class="carta tras2">${carta(c)}</div>`:''}${b?`<div class="carta tras">${carta(b)}</div>`:''}${a?`<div class="carta topo" id="carta" data-id="${a.id}"><span class="carimbo pega">PEGAR</span><span class="carimbo pula">PULAR</span>${carta(a)}</div>`:`<div class="bloco" style="text-align:center;padding:40px"><h3 style="font-size:32px">Fila vazia</h3><p class="apagado">Você viu tudo o que está sem dono com esses filtros.</p>${st.pulados.size?`<button class="btn" onclick="st.pulados.clear();pintar()">Ver os ${st.pulados.size} que pulei</button>`:''}</div>`}</div>
+   ${a?`<div class="controle"><button class="btn" id="b-pular" onclick="pular()">Pular</button><button class="btn" onclick="alternarRota('${a.id}');toast(st.rota.includes('${a.id}')?'Na rota.':'Fora da rota.')">Pôr na rota</button><button class="btn forte" id="b-pegar-c" onclick="pegarCarta()">PEGAR</button></div>`:''}</div>
+   <div class="lateral so-pc"><div class="bloco"><div class="t">Como usar</div><div class="pq">Arraste a carta para a direita para pegar e para a esquerda para pular. No teclado: <span class="atalho">→</span> pegar, <span class="atalho">←</span> pular.</div></div>
+   <div class="bloco"><div class="t">Ordem da fila</div><div class="pq">Novos primeiro, depois quem vence em até 30 dias, projetos deferidos para executar, multas, AF e protocolos.</div></div>
+   <div class="bloco"><div class="t">Hoje</div><div class="pq">${st.rota.length} na rota · ${leads.filter(l=>l.dono===st.eu.id).length} na sua carteira</div></div></div></div></div>`;
+  if(a){ligarArraste($('#carta'),a.id);$('#carta .miolo').scrollTop=0;}}
+function carta(l){const cf=checar(l,st.eu.id);return `<div class="capa ${simbolo(l)}"><h2>${TIPO[simbolo(l)].g}</h2><div class="sub">${subG(l)}${ehNovo(l)?' · NOVO':''}</div></div><div class="miolo"><div class="pilha" style="gap:3px"><h3>${esc(l.nome)}</h3><div class="pq">${esc(l.rua)}, ${l.num} · ${esc(l.cidade)}</div><div class="pq apagado">${area(areaG(l))} · <span class="mono">${l.id}</span></div></div>${blocoProt(l)}${blocoPend(l)}${cf.length?`<div class="alerta-terr pq"><b>${esc(conta(cf[0].o.dono).nome)} já trabalha aqui</b>${cf[0].mot.join(', ')}</div>`:''}${corpoLead(l)}</div>`;}
+function tick(l){return `<button class="tick" data-id="${l.id}" onclick="abrir('${l.id}')"><div class="faixa ${simbolo(l)}"><b>${TIPO[simbolo(l)].g}</b><span class="esp"></span>${grupo(l).length>1?`<span class="pq" style="font-weight:700">${resumoG(l)}</span>`:''}${ehNovo(l)?'<span class="pq" style="font-weight:700">NOVO</span>':''}</div><div class="corpo"><h4>${esc(l.nome)}</h4><div class="pq">${esc(l.rua)}, ${l.num} · ${esc(l.cidade)}</div>${(l.pend||[])[0]?`<div class="pd">${esc(l.pend[0])}</div>`:''}<div class="pq apagado">${area(l.area)}${prazoEf(l)!=null?(prazoEf(l)<0?' · vencido há '+(-prazoEf(l))+' dia(s)':' · prazo '+prazoEf(l)+' dia(s)'):''}${l.sit?' · '+l.sit[0]:''}${etapa(l)?' · '+ETAPA[etapa(l).k][0]:''}</div></div></button>`;}
+function pular(){const q=filaAtual();if(q[0]){gr(q[0]).forEach(x=>st.pulados.add(x.id));pintar();}}
+function pegarCarta(){const q=filaAtual();if(q[0])pegar(q[0].id);}
+function ligarArraste(el,id){let x0=0,dx=0,ativo=false;
+  el.addEventListener('pointerdown',e=>{if(e.target.closest('button,a'))return;ativo=true;x0=e.clientX;dx=0;el.setPointerCapture(e.pointerId);el.style.transition='none';});
+  el.addEventListener('pointermove',e=>{if(!ativo)return;dx=e.clientX-x0;el.style.transform=`translateX(${dx}px) rotate(${dx/22}deg)`;el.querySelector('.pega').style.opacity=Math.max(0,dx/120);el.querySelector('.pula').style.opacity=Math.max(0,-dx/120);});
+  const fim=()=>{if(!ativo)return;ativo=false;el.style.transition='transform .18s';if(dx>110)return pegar(id);if(dx<-110)return pular();el.style.transform='';el.querySelector('.pega').style.opacity=0;el.querySelector('.pula').style.opacity=0;};
+  el.addEventListener('pointerup',fim);el.addEventListener('pointercancel',fim);}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#modal'))fecharModal();else if(st.aberto||st.marcando)fecharGaveta();}
+  if(st.vista==='fila'&&st.filaModo==='cartas'&&!$('#modal')&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){if(e.key==='ArrowRight')pegarCarta();if(e.key==='ArrowLeft')pular();}});
+
+/* ========== carteira ========== */
+function itensCart(id){return[...unicos(leads.filter(l=>l.dono===id)),...obras.filter(o=>o.dono===id)];}
+function pintarMeusClientes(id){const cs=obras.filter(o=>o.dono===id&&obraAtiva(o)),pend=pedidos.filter(p=>p.tipo==='cad'&&p.st==='aberto'&&p.quem===id);
+  return `<div class="mcli" id="meus-clientes">${pend.map(p=>`<div class="notif nova" data-pend="${p.id}"><b>${esc(p.nova.nome)}</b><span class="pq">${esc(p.nova.cidade)}</span><span class="selo vai" style="align-self:flex-start">Aguardando aprovação</span></div>`).join('')}${cs.map(o=>`<button class="notif" data-cli="${o.id}" onclick="abrir('${o.id}')"><b>${esc(o.nome)}</b><span class="pq">${esc(o.cidade)}${o.area?' · '+area(o.area):''}</span><span class="pq apagado">${o.retorno?'Retorno em '+fmtRet(o):'Última visita '+haQuanto(o.ultVisita)}</span></button>`).join('')||(pend.length?'':'<div class="bloco apagado">Nenhum cliente ainda. Cadastre em Território.</div>')}</div>`;}
+function pintarCarteira(){const id=souAdm()?st.quemCart:st.eu.id,it=itensCart(id);
+  $('#painel').innerHTML=`<div class="pagina"><div class="linha"><h1 class="titulo">${souAdm()?'Carteira de '+esc(conta(id).nome):'Minha carteira'}</h1><span class="esp"></span>${souAdm()?`<span class="seg" id="seg-quem">${vendedores().map(v=>`<button class="${v.id===id?'on':''}" onclick="st.quemCart='${v.id}';pintar()">${esc(v.nome)}</button>`).join('')}</span>`:''}</div>
+  <div class="linha" style="margin:6px 0 12px"><span class="seg" id="seg-cart"><button class="${st.cartModo==='funil'?'on':''}" onclick="st.cartModo='funil';pintar()">Funil</button><button class="${st.cartModo==='clientes'?'on':''}" onclick="st.cartModo='clientes';pintar()">Meus clientes</button></span><span class="pq apagado so-pc">${st.cartModo==='funil'?'Arraste entre as colunas.':''}</span></div>
+  ${st.cartModo==='clientes'?pintarMeusClientes(id):`<div class="quadro" id="quadro">${STAT.map(([k,t])=>{const c=it.filter(x=>x.status===k);return `<section class="coluna ${k}" data-k="${k}" ondragover="event.preventDefault();this.classList.add('sobre')" ondragleave="this.classList.remove('sobre')" ondrop="soltarCart(event,'${k}')"><header>${t}<span>${c.length}</span></header>${c.map(cart).join('')||'<span class="pq apagado">Vazio</span>'}</section>`;}).join('')}</div>`}</div>`;}
+function cart(x){const camp=x.tipo==='CAMPO',cor=camp?'#fff':({MUL:'var(--mul)',AF:'var(--af)',PRO:'var(--pro)'})[x.tipo];
+  return `<article class="cart" draggable="true" data-id="${x.id}" style="--cor:${cor}" ondragstart="event.dataTransfer.setData('text/plain','${x.id}')"><span class="tp">${resumoG(x)}</span><button style="all:unset;cursor:pointer" class="nome" onclick="abrir('${x.id}')">${esc(x.nome)}</button><span class="pq apagado">${esc(x.cidade)}</span>
+  <select aria-label="Situação" onchange="marcar('${x.id}',this.value)">${STAT.map(([k,t])=>`<option value="${k}" ${x.status===k?'selected':''}>${t}</option>`).join('')}</select></article>`;}
+function soltarCart(e,k){e.preventDefault();const id=e.dataTransfer.getData('text/plain');if(id)marcar(id,k);}
+
+/* ========== território ========== */
+function filtroObra(o){const f=st.terrFiltro;if(f==='minhas')return o.dono===st.eu.id;if(f==='vencendo')return (souAdm()||o.dono===st.eu.id)&&precisaRevisar(o);return true;}
+function seloObra(o){if(!souAdm()&&o.dono!==st.eu.id)return '<span class="selo">Com dono</span>';if(o.status==='fechado')return '<span class="selo ok">Fechado</span>';if(o.retorno&&retDate(o)>Date.now())return `<span class="selo bom">Retorno ${new Date(retDate(o)).toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})}</span>`;return precisaRevisar(o)?'<span class="selo vai">Revisar</span>':'<span class="selo bom">Fidelizado</span>';}
+function linhaObra(o){const d=conta(o.dono);return `<button class="linha-obra" data-obra="${o.id}" onclick="abrir('${o.id}',true)"><span class="av" style="background:${obraAtiva(o)?d.cor:'#536170'}">${d.l}</span><span class="d"><b>${esc(o.nome)}</b><span class="pq apagado">${esc(o.rua)}, ${o.num} · ${esc(o.cidade)}${ultProva(o)?' · comprovada':''}</span></span>${seloObra(o)}</button>`;}
+function pintarTerr(){const f=st.terrFiltro,lst=obras.filter(filtroObra).sort(souAdm()?(a,b)=>precisaRevisar(b)-precisaRevisar(a)||a.nome.localeCompare(b.nome):(a,b)=>((b.dono===st.eu.id)-(a.dono===st.eu.id))||a.nome.localeCompare(b.nome)),meus=pedidos.filter(p=>p.quem===st.eu.id&&p.st==='aberto');
+  const foco=document.activeElement&&document.activeElement.id==='t-busca';
+  $('#terr').innerHTML=`<div class="cab"><h2>Antes de visitar, confira</h2>
+   <input class="inp" id="t-busca" placeholder="Nome da obra ou endereço" value="${esc(st.busca)}" oninput="st.busca=this.value;pintarVeredito()" autocomplete="off">
+   <div id="veredito"></div>
+   <div class="linha"><button class="btn" id="b-marcar" style="background:#fff;color:#111" onclick="iniciarMarcacao()">Cadastrar cliente</button><button class="btn" id="b-perto" onclick="pertoDeMim()">Perto de mim</button></div>
+   <div class="linha"><span class="seg" id="seg-terr">${[['todas','Todas'],['minhas','Minhas'],['vencendo','A revisar']].map(([k,t])=>`<button class="${f===k?'on':''}" onclick="st.terrFiltro='${k}';pintar()">${t}</button>`).join('')}</span></div>
+   <div class="legenda">${vendedores().filter(v=>!v.bloq).map(v=>donoHtml(v.id)).join('')}</div></div>
+   <div class="rola" id="t-lista">${meus.map(p=>`<div class="bloco pq"><b>Aguardando o administrador:</b> ${esc(nomePedido(p))}</div>`).join('')}${st.perto?blocoPerto():''}${lst.map(linhaObra).join('')||'<span class="pq apagado">Nenhuma obra aqui.</span>'}</div>`;
+  pintarVeredito();if(foco){const i=$('#t-busca');i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
+function pintarVeredito(){const v=$('#veredito');if(!v)return;const pb=buscaProt(st.busca);if(!barrado(pb)&&pendBusca(st.busca,souAdm()?null:st.eu.id)){v.innerHTML=`<div class="veredito ocupada" id="v-pend"><b>CADASTRO EM ANÁLISE</b><span class="pq">Já existe um cadastro para esta obra aguardando o administrador.</span></div>`;return;}
+  if(barrado(pb)){const ja=pedidos.some(x=>x.tipo==='prot'&&x.prot===pb.id&&x.quem===st.eu.id&&x.st==='aberto');v.innerHTML=`<div class="veredito ocupada" id="v-prot"><b>CLIENTE PROTEGIDO</b><span class="pq">Este cliente é de ${esc(conta(pb.dono).nome)}. Só entra com autorização do administrador.</span>${ja?'<div class="pq">Pedido enviado.</div>':`<div style="margin-top:8px"><button class="btn pq" id="v-pedir" onclick="pedirProt('${pb.id}')">Pedir autorização</button></div>`}</div>`;return;}
+  const r=buscaTerr(st.busca);if(!r){v.innerHTML='';return;}
+  const tot=r.obras.length+r.leads.length;
+  if(!tot){v.innerHTML=`<div class="veredito livre" id="v-livre"><b>NINGUÉM MARCOU</b><span class="pq">Nenhuma obra ou lead com esse nome ou endereço. Marque depois da visita.</span></div>`;return;}
+  const it=[...r.obras.map(o=>({x:o,t:'campo'})),...r.leads.map(l=>({x:l,t:'lead'}))].slice(0,3);
+  v.innerHTML=`<div class="veredito ocupada" id="v-ocup"><b>JÁ TEM DONO</b>${it.map(i=>`<div class="pq"><button style="all:unset;cursor:pointer;text-decoration:underline" onclick="abrir('${i.x.id}',true)">${esc(i.x.nome)}</button> · ${esc(conta(i.x.dono).nome)} · ${esc(i.x.cidade)}</div>`).join('')}</div>`;}
+function pertoDeMim(){const[b,g]=CIDADES.Brusque;st.perto={lat:b,lng:g};st.terrFiltro='todas';pintar();if(mapa)mapa.flyTo([b,g],14,{duration:.8});toast('Esboço: posição simulada no centro de Brusque.');}
+function blocoPerto(){const p=st.perto,ob=obras.filter(o=>obraAtiva(o)&&metros(p,o)<=1000),le=leads.filter(l=>metros(p,l)<=1000);
+  return `<div class="bloco pq" id="b-resp-perto"><b>Em até 1 km de você:</b> ${ob.length} obra(s) com dono e ${le.length} lead(s) do radar. <button class="btn pq" onclick="st.perto=null;pintar()">Fechar</button></div>`;}
+function iniciarMarcacao(){const c=NC[0],[la,lo]=CIDADES[c];st.aberto=null;st.marcando={nome:'',doc:'',rua:'',num:'',cidade:c,area:'',re:'',retorno:'',status:'contatado',obs:'',lat:la,lng:lo,manual:false,dono:'ana'};pintarGaveta();desenharPino();if(mapa)mapa.flyTo([la,lo],13,{duration:.6});}
+function formMarcar(){const m=st.marcando;return `<div class="capa CAMPO" style="--cor-dono:#fff"><h2>CADASTRAR</h2><div class="sub">Cliente encontrado por você em campo</div></div>
+  <div class="miolo"><label class="c">Nome da obra ou empresa<input class="inp" id="o-nome" value="${esc(m.nome)}" oninput="campoM('nome',this.value)" autocomplete="off"></label>
+  <label class="c">CNPJ ou CPF (só você e o administrador veem)<input class="inp" id="o-doc" value="${esc(m.doc)}" inputmode="numeric" oninput="st.marcando.doc=this.value" autocomplete="off"></label>
+  <div class="linha" style="flex-wrap:nowrap"><label class="c" style="flex:1;min-width:0">Rua<input class="inp" id="o-rua" value="${esc(m.rua)}" oninput="campoM('rua',this.value)" autocomplete="off"></label><label class="c" style="width:80px">Número<input class="inp" id="o-num" value="${esc(m.num)}" oninput="campoM('num',this.value)" autocomplete="off"></label></div>
+  <label class="c">Cidade<select class="inp" id="o-cid" onchange="campoM('cidade',this.value)">${NC.map(c=>`<option ${m.cidade===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
+  <div class="linha" style="flex-wrap:nowrap"><label class="c" style="flex:1;min-width:0">Metragem (m²)<input class="inp" id="o-area" type="number" min="0" inputmode="numeric" value="${esc(m.area)}" oninput="st.marcando.area=this.value"></label><label class="c" style="flex:1;min-width:0">RE(s), separados por vírgula<input class="inp" id="o-re" value="${esc(m.re)}" oninput="st.marcando.re=this.value" autocomplete="off"></label></div>
+  <label class="c">Retorno previsto (opcional)<input class="inp" id="o-ret" type="month" value="${esc(m.retorno)}" oninput="st.marcando.retorno=this.value"></label>
+  <label class="c">Observação (só você e o administrador leem)<textarea class="inp" id="o-obs" rows="2" placeholder="Ex.: cliente vai orçar em fevereiro" oninput="st.marcando.obs=this.value">${esc(m.obs)}</textarea></label>
+  ${souAdm()?`<label class="c">Vendedor<select class="inp" id="o-dono" onchange="st.marcando.dono=this.value">${vendedores().filter(v=>!v.bloq).map(v=>`<option value="${v.id}" ${m.dono===v.id?'selected':''}>${esc(v.nome)}</option>`).join('')}</select></label>`:''}
+  <div class="bloco pq"><b>Toque no mapa</b> ou arraste o pino branco até o local exato.</div>
+  <div class="bloco pq" id="o-prova-b">${m.prova?`<span class="selo ok" id="o-prova-ok">Visita comprovada a ${m.prova.m} m do pino</span>`:`<button class="btn pq" id="o-prova" onclick="comprovarMarcacao()">Estou na obra: comprovar</button> <span class="apagado">Dá mais força ao seu cadastro.</span>`}</div>
+  <div id="o-conf"></div><div class="erro" id="o-erro" hidden></div>
+  <button class="btn forte" id="o-salvar" onclick="salvarObra()">${souAdm()?'CADASTRAR':'ENVIAR PARA APROVAÇÃO'}</button></div>`;}
+function campoM(c,v){const m=st.marcando;m[c]=v;if(c==='cidade'&&!m.manual){[m.lat,m.lng]=CIDADES[v];desenharPino();if(mapa)mapa.panTo([m.lat,m.lng]);if(m.prova){m.prova=null;return pintarGaveta();}}atualizarChecagem();}
+function pendDe(d,eu){return pedidos.find(p=>p.tipo==='cad'&&p.st==='aberto'&&p.quem!==eu&&((d.nome&&d.cidade===p.nova.cidade&&parecido(d.nome,p.nova.nome)>=.72)||(d.rua&&d.num&&d.cidade===p.nova.cidade&&norm(d.rua)===norm(p.nova.rua)&&String(d.num)===String(p.nova.num))));}
+function pendBusca(q,eu){const n=norm(q);if(n.length<3)return null;const pal=n.split(' ');return pedidos.find(p=>p.tipo==='cad'&&p.st==='aberto'&&p.quem!==eu&&pal.every(x=>norm(p.nova.nome+' '+p.nova.rua+' '+p.nova.num+' '+p.nova.cidade).includes(x)));}
+function blocoPend(l){if(l.prot||souAdm())return '';const p=pendDe(l,st.eu.id);return p?`<div class="alerta-terr prot pq" id="alerta-pend"><b>CADASTRO EM ANÁLISE</b>Outro cadastro para esta obra aguarda o administrador.</div>`:'';}
+function atualizarChecagem(){const m=st.marcando,b=$('#o-conf');if(!m||!b)return;const pb=buscaProt(m.nome),eu=souAdm()?null:st.eu.id;
+  if(barrado(pb)){b.innerHTML=`<div class="veredito ocupada" id="o-prot"><b>CLIENTE PROTEGIDO</b><span class="pq">Este cliente já tem dono. O administrador decide.</span></div>`;return;}
+  const cf=checar(m,eu);if(cf.length){const c=cf[0];b.innerHTML=`<div class="veredito ocupada" id="o-ocup"><b>${esc(conta(c.o.dono).nome.toUpperCase())} JÁ ESTÁ AQUI</b><span class="pq">${esc(c.o.nome)} · ${c.mot.join(', ')}. O administrador decide.</span></div>`;return;}
+  const pe=pendDe(m,eu);if(pe){b.innerHTML=`<div class="veredito ocupada" id="o-pend"><b>CADASTRO EM ANÁLISE</b><span class="pq">Já existe um cadastro anterior para esta obra. O administrador decide.</span></div>`;return;}
+  b.innerHTML=m.nome.length>2?`<div class="veredito livre" id="o-livre"><b>NADA ENCONTRADO</b><span class="pq">Nenhum cliente com esse nome ou endereço até agora.</span></div>`:'';}
+function salvarObra(){const m=st.marcando,e=$('#o-erro'),nome=m.nome.trim(),dg=m.doc.replace(/\D/g,''),f=t=>{e.textContent=t;e.hidden=false;};
+  if(nome.length<3||!m.rua.trim())return f('Informe o nome e a rua da obra.');if(dg&&dg.length!==11&&dg.length!==14)return f('CNPJ tem 14 dígitos e CPF tem 11.');
+  const dono=souAdm()?m.dono:st.eu.id,dados={nome,doc:dg,rua:m.rua.trim(),num:m.num.trim(),cidade:m.cidade,lat:m.lat,lng:m.lng,area:+m.area||null,re:m.re.trim(),retorno:m.retorno,status:m.status,obs:m.obs.trim(),dono,visitas:[{t:Date.now(),prova:!!m.prova,m:m.prova?m.prova.m:null}]};
+  st.marcando=null;desenharPino();
+  if(souAdm()){const o=aprovarCadastro(dados);st.aberto=o.id;toast('Cliente fidelizado para '+conta(dono).nome+'.');return pintar();}
+  pedidos.push({id:'P'+(seqPed++),tipo:'cad',quem:st.eu.id,nova:dados,prova:m.prova?{m:m.prova.m}:null,quando:Date.now(),st:'aberto'});contar('visitas');if(m.prova)contar('comprovadas');toast('Cadastro enviado para aprovação.');pintar();}
+function aprovarCadastro(d){const o=novaObra(Object.assign({},d,{fidelizado:true,desde:Date.now(),ultVisita:Date.now()}));novoProt({nome:d.nome,termos:[d.nome],doc:d.doc||'',res:(d.re||'').split(',').map(x=>x.trim()).filter(Boolean),dono:d.dono,fid:o.id});aplicarProtegidos();return o;}
+function cartaCad(p){const d=p.nova,q=conta(p.quem),cf=checar(d,p.quem),pb=protegidos.find(x=>x.dono!==p.quem&&(x.termos.some(t=>temTermo(d.nome,t))||docBate(x.doc,d.doc||''))),ant=pedidos.find(x=>x!==p&&x.tipo==='cad'&&x.st==='aberto'&&x.quando<p.quando&&x.quem!==p.quem&&parecido(x.nova.nome,d.nome)>=.72&&x.nova.cidade===d.cidade);
+  const avisos=[pb?`Cliente protegido de ${esc(conta(pb.dono).nome)}: ${esc(pb.nome)}.`:'',...cf.map(c=>`${esc(conta(c.o.dono).nome)} tem ${esc(c.o.nome)} (${c.mot.join(', ')}).`),ant?`${esc(conta(ant.quem).nome)} enviou um cadastro parecido antes.`:''].filter(Boolean);
+  return `<article class="conflito" data-p="${p.id}" data-cad><div class="linha"><h3>${esc(d.nome)}</h3><span class="esp"></span>${donoHtml(p.quem)}</div>
+  <div class="pq">${esc(d.rua)}, ${esc(d.num)} · ${esc(d.cidade)}${d.area?' · '+area(d.area):''}${d.re?' · RE '+esc(d.re):''}</div>
+  <div class="pq apagado">Enviado ${haQuanto(p.quando)} (${fmtData(p.quando)} às ${fmtHora(p.quando)})${d.doc?' · Documento: <span class="mono">'+esc(d.doc)+'</span>':''}${p.prova?' · Visita comprovada a '+p.prova.m+' m':''}</div>
+  ${d.obs?`<div class="obs pq">${esc(d.obs)}</div>`:''}
+  ${avisos.length?`<div class="alerta-terr prot pq" data-cad-aviso>${avisos.join('<br>')}</div>`:'<div class="pq" style="color:var(--livre)">Nenhum conflito encontrado.</div>'}
+  <div class="linha" style="flex-wrap:nowrap"><label class="c" style="flex:1;min-width:0">Retorno previsto<input class="inp" id="cad-ret-${p.id}" type="month" value="${esc(d.retorno||'')}"></label><label class="c" style="flex:1;min-width:0">Motivo, se recusar<input class="inp" id="cad-mot-${p.id}" autocomplete="off"></label></div>
+  <div class="linha"><button class="btn" data-acao="recusa" onclick="decidir('${p.id}','recusa')">Recusar</button><button class="btn" data-acao="aprova" style="background:#fff;color:#111" onclick="decidir('${p.id}','aprova')">Aprovar para ${esc(q.nome)}</button></div></article>`;}
+function decidirCad(p,acao){const r=$('#cad-ret-'+p.id),mo=$('#cad-mot-'+p.id),d=p.nova,mot=mo?mo.value.trim():'';p.st='fechado';
+  if(acao==='aprova'){if(r)d.retorno=r.value;d.dono=p.quem;const o=aprovarCadastro(d);p.desc='aprovado para '+conta(p.quem).nome;notificar(p.quem,'Cliente aprovado',d.nome+' agora é seu cliente fidelizado.'+(d.retorno?' Retorno em '+fmtRet(o)+'.':''),o.id);}
+  else{p.desc='recusado'+(mot?': '+mot:'');notificar(p.quem,'Cadastro recusado',d.nome+(mot?'. Motivo: '+mot:''));}
+  toast('Cadastro '+p.desc+'.');pintar();}
+
+/* ========== comando ========== */
+function dias14(){return Array.from({length:14},(_,i)=>{const d=new Date(AGORA-(13-i)*D);d.setHours(12,0,0,0);return d;});}
+function funil(id){const it=itensCart(id),c=s=>it.filter(x=>x.status===s).length;const vs=it.flatMap(x=>x.visitas||[]);return{prov:vs.filter(v=>v.prova).length,semProv:vs.filter(v=>!v.prova).length,total:it.length,leads:leads.filter(l=>l.dono===id).length,campo:obras.filter(o=>o.dono===id).length,cont:c('contatado'),vis:c('visitar'),fech:c('fechado'),desc:c('descartado')};}
+function pintarComando(){const c=st.cmd,pend=pedidos.filter(p=>p.st==='aberto').length;
+  const aba=(k,t)=>`<button class="${c===k?'on':''}" data-a="${k}" onclick="st.cmd='${k}';pintar()">${t}</button>`;
+  $('#painel').innerHTML=`<div class="pagina"><h1 class="titulo">Comando</h1><div class="abas">${aba('equipe','Equipe')}${aba('registro','Registro diário')}${aba('conflitos','Pedidos'+(pend?' ('+pend+')':''))}${aba('protegidos','Clientes')}${aba('vendas','Vendas')}${aba('coleta','Coleta')}${aba('regras','Regras')}</div><div id="cmd"></div></div>`;
+  ({equipe:cmdEquipe,registro:cmdRegistro,conflitos:cmdConflitos,protegidos:cmdProt,vendas:cmdVendas,coleta:cmdColeta,regras:cmdRegras})[c]();}
+function cmdEquipe(){const ks=dias14().map(d=>chaveDia(+d)),hoje=chaveDia(Date.now());
+  $('#cmd').innerHTML=`<div class="linha" style="margin-bottom:12px"><span class="apagado pq">${contas.filter(x=>x.sess).length} online agora</span><span class="esp"></span><button class="btn pq" id="b-msg" onclick="modalMsg()">Enviar mensagem</button><button class="btn pq perigo" id="b-todos" onclick="pedirTodos()">Desconectar todos</button><button class="btn pq" id="b-nova" style="background:#fff;color:#111" onclick="modalNova()">Nova conta</button></div>
+  <div class="crachas" id="crachas">${contas.map(u=>{const ad=u.papel==='admin',f=funil(u.id),ho=(uso[hoje]||{})[u.id],eu=u===st.eu;
+   const barras=ks.map(k=>{const m=((uso[k]||{})[u.id]||{}).min||0;return `<i class="${m?'':'zero'}" style="height:${m?Math.max(8,Math.round(m/120*100)):2}%;background:${m?u.cor:''}" title="${k}: ${m?m+' min':'não entrou'}"></i>`;}).join('');
+   return `<article class="cracha ${u.bloq?'bloq':''}" data-conta="${u.id}"><div class="top"><span class="fot" style="background:${u.cor}">${u.l}</span><div style="min-width:0;flex:1"><h3>${esc(u.nome)}</h3><div class="pq apagado" style="overflow-wrap:anywhere">${esc(u.email)}</div></div><span class="etq"><i class="dot ${u.sess?'':'alerta'}" style="${u.bloq?'background:var(--mul)':''}"></i>${u.bloq?'Bloqueada':u.sess?'Online':'Offline'}</span></div>
+   <div class="cont"><div class="pq"><span class="mono">${u.ip}</span> · ${esc(u.ap)}<br><span class="apagado">Último login ${haQuanto(u.ultLogin)}${u.sess&&u.ult?' · ativo '+haQuanto(u.ult):''}</span></div>
+   ${ad?'':`<div class="trio"><div><b>${ho?ho.min:0}</b><span>min hoje</span></div><div><b>${f.leads}</b><span>leads</span></div><div><b>${f.campo}</b><span>campo</span></div><div><b>${f.fech}</b><span>fechados</span></div></div>
+   <div class="pq" data-prova><b>${f.prov}</b> visitas comprovadas · ${f.semProv} sem comprovação</div>
+   <div><div class="barras" aria-label="Minutos ativos por dia, últimos 14 dias">${barras}</div><div class="linha pq apagado" style="margin-top:2px"><span>14 dias atrás</span><span class="esp"></span><span>hoje · até 120 min</span></div></div>`}
+   <div class="linha">${u.sess&&!eu?`<button class="btn pq" onclick="derrubar('${u.id}')">Desconectar</button>`:''}<button class="btn pq" onclick="modalSenha('${u.id}')">Trocar senha</button>${eu?'':`<button class="btn pq" data-acao="bloq" onclick="alternarBloq('${u.id}')">${u.bloq?'Desbloquear':'Bloquear'}</button>`}</div></div></article>`;}).join('')}</div>`;}
+function cmdRegistro(){const dia=uso[st.dia]||{},vs=vendedores();
+  $('#cmd').innerHTML=`<div class="linha" style="margin-bottom:12px"><input class="inp" id="u-dia" type="date" style="width:auto" value="${st.dia}" onchange="st.dia=this.value;pintar()"><span class="pq apagado">${vs.filter(v=>dia[v.id]).length} de ${vs.filter(v=>!v.bloq).length} vendedores entraram</span><span class="esp"></span><button class="btn pq" id="b-csv" onclick="baixarCsv()">Baixar CSV</button></div>
+  <div class="tab-wrap"><table id="t-uso"><tr><th>Vendedor</th><th>1ª entrada</th><th>Última atividade</th><th>IP</th><th>Aparelho</th><th class="n">Logins</th><th class="n">Min ativos</th><th class="n">Abertos</th><th class="n">Pegos</th><th class="n">Status</th><th class="n">Visitas</th><th class="n">Comprovadas</th></tr>
+  ${vs.map(v=>{const u=dia[v.id];return u?`<tr data-v="${v.id}"><td>${donoHtml(v.id)}</td><td>${fmtHora(u.ent)}</td><td>${fmtHora(u.ult)}</td><td class="mono">${u.ip}</td><td>${esc(u.ap)}</td><td class="n">${u.logins}</td><td class="n">${u.min}</td><td class="n">${u.abertos}</td><td class="n">${u.pegos}</td><td class="n">${u.marcados}</td><td class="n">${u.visitas||0}</td><td class="n">${u.comprovadas||0}</td></tr>`:`<tr class="aus" data-v="${v.id}"><td>${donoHtml(v.id)}</td><td colspan="11">Não entrou${v.bloq?' (conta bloqueada)':''}</td></tr>`;}).join('')}</table></div>
+  <h2 style="font-size:28px;margin:18px 0 8px">Resultado por vendedor</h2><div class="tab-wrap"><table id="t-funil"><tr><th>Vendedor</th><th class="n">Leads</th><th class="n">Campo</th><th class="n">Contatados</th><th class="n">A visitar</th><th class="n">Fechados</th><th class="n">Descartados</th><th class="n">Visitas comprovadas</th><th class="n">Fechados / total</th></tr>${vs.map(v=>{const f=funil(v.id);return `<tr><td>${donoHtml(v.id)}</td><td class="n">${f.leads}</td><td class="n">${f.campo}</td><td class="n">${f.cont}</td><td class="n">${f.vis}</td><td class="n">${f.fech}</td><td class="n">${f.desc}</td><td class="n">${f.prov}</td><td class="n">${f.total?Math.round(f.fech/f.total*100)+'%':'—'}</td></tr>`;}).join('')}</table></div>`;}
+function cmdConflitos(){const abs=pedidos.filter(p=>p.st==='aberto'),hist=pedidos.filter(p=>p.st!=='aberto');
+  $('#cmd').innerHTML=`<div class="pilha" id="conflitos">${abs.map(p=>{if(p.tipo==='cad')return cartaCad(p);if(p.tipo==='prot')return cartaProt(p);const o=achar(p.alvo),q=conta(p.quem),a=p.tipo==='lead'?achar(p.lead):p.nova;return `<article class="conflito" data-p="${p.id}"><h3>${esc(a.nome)}</h3><div class="pq">${esc(q.nome)} pediu esta ${p.tipo==='lead'?'lead do radar':'obra de campo'} ${haQuanto(p.quando)}. ${o?esc(conta(o.dono).nome)+' tem '+esc(o.nome)+(a.aprox?' (mesmo endereço)':' ('+Math.round(metros(a,o))+' m)')+'. Última visita '+haQuanto(o.ultVisita)+'.':'A obra original foi liberada.'}</div>
+   ${forcaPedido(p,o,q)}
+   <div class="linha"><button class="btn" data-acao="dono" onclick="decidir('${p.id}','mantem')">Fica com ${o?esc(conta(o.dono).nome):'o dono'}</button><button class="btn" data-acao="pede" style="background:#fff;color:#111" onclick="decidir('${p.id}','passa')">Passa para ${esc(q.nome)}</button>${p.tipo==='obra'?`<button class="btn" data-acao="ambos" onclick="decidir('${p.id}','ambos')">São obras diferentes</button>`:''}</div></article>`;}).join('')||'<div class="bloco apagado">Nenhum pedido aberto.</div>'}
+   ${hist.length?`<h2 style="font-size:24px;margin-top:10px">Decididos</h2>${hist.map(p=>`<div class="bloco pq">${esc(nomePedido(p))} · ${esc(p.desc||'')}</div>`).join('')}`:''}</div>`;}
+function forcaPedido(p,o,q){const dp=o?ultProva(o):null,np=o?(o.visitas||[]).filter(v=>v.prova).length:0,qp=p.prova,dn=o?conta(o.dono).nome:'Dono',sug=qp&&!dp?q.nome:dp&&!qp?dn:null;
+  return `<div class="bloco pq" data-forca><div><b>${esc(dn)}:</b> ${np?np+' visita(s) comprovada(s), última '+haQuanto(dp.t):'nenhuma visita comprovada'}</div><div><b>${esc(q.nome)}:</b> ${qp?'visita comprovada a '+qp.m+' m, '+haQuanto(p.quando):'sem visita comprovada'}</div><div style="margin-top:6px">${sug?`<span class="selo ok">Prova mais forte: ${esc(sug)}</span>`:'<span class="selo vai">Nenhum lado tem vantagem de prova</span>'}</div></div>`;}
+function decidir(id,acao){const p=pedidos.find(x=>x.id===id),o=achar(p.alvo),q=conta(p.quem);
+  if(p.tipo==='cad')return decidirCad(p,acao);
+  if(p.tipo==='prot'){if(acao==='autoriza'){if(p.lead)gr(achar(p.lead)).forEach(x=>{x.dono=p.quem;x.liberado=true;});if(p.nova)novaObra(p.nova);p.desc='autorizado para '+q.nome;}else p.desc='negado para '+q.nome;p.st='fechado';notificar(p.quem,acao==='autoriza'?'Autorização aprovada':'Autorização negada',nomePedido(p),p.lead||null);toast('Decisão registrada: '+p.desc+'.');return pintar();}
+  if(acao==='passa'){if(p.tipo==='lead'){if(o)obras.splice(obras.indexOf(o),1);const l=achar(p.lead);gr(l).forEach(y=>y.dono=p.quem);if(p.prova)l.visitas.push({t:p.quando,prova:true,m:p.prova.m});}else{if(o)obras.splice(obras.indexOf(o),1);novaObra(p.nova);}p.desc='passou para '+q.nome;}
+  else if(acao==='ambos'){novaObra(p.nova);p.desc='registradas como obras diferentes';}
+  else p.desc='ficou com '+(o?conta(o.dono).nome:'o dono');
+  p.st='fechado';notificar(p.quem,'Decisão do administrador',nomePedido(p)+': '+p.desc+'.');toast('Decisão registrada: '+p.desc+'.');pintar();}
+function vendasDe(id){const fx=itensCart(id).filter(x=>x.status==='fechado'),por={};VENDAS.forEach(k=>por[k]=fx.filter(x=>x.vendido.includes(k)).length);return{fechados:fx.length,por,semClass:fx.filter(x=>!x.vendido.length)};}
+function cmdVendas(){const vs=vendedores(),sem=vs.flatMap(v=>vendasDe(v.id).semClass.map(x=>({x,v})));
+  $('#cmd').innerHTML=`<p class="pq apagado" style="margin:0 0 10px">Só você vê esta tela. Classifique cada fechamento para saber o que cada vendedor mais vende. Um fechamento pode contar em mais de um tipo.</p>
+  <div class="tab-wrap"><table id="t-vendas"><tr><th>Vendedor</th><th class="n">Fechados</th><th>Mais vende</th><th>O que vendeu</th></tr>${vs.map(v=>{const d=vendasDe(v.id),m=Math.max(...VENDAS.map(k=>d.por[k]));return `<tr data-v="${v.id}"><td>${donoHtml(v.id)}</td><td class="n">${d.fechados}</td><td>${m?VENDAS.filter(k=>d.por[k]===m).join(', '):'—'}</td><td>${VENDAS.filter(k=>d.por[k]).map(k=>k+' '+d.por[k]).join(' · ')||'—'}</td></tr>`;}).join('')}</table></div>
+  <h2 style="font-size:28px;margin:18px 0 8px">Fechados sem classificar (${sem.length})</h2><div class="pilha" id="sem-class">${sem.map(({x,v})=>`<div class="conflito" data-id="${x.id}"><div class="linha"><b>${esc(x.nome)}</b><span class="pq apagado">${esc(v.nome)} · ${esc(x.cidade)} · ${x.tipo==='CAMPO'?'Campo':TIPO[x.tipo].g}</span></div><div class="chips">${VENDAS.map(k=>`<button class="chip" onclick="alternarVenda('${x.id}','${k}')">${k}</button>`).join('')}</div></div>`).join('')||'<div class="bloco apagado">Tudo classificado.</div>'}</div>`;}
+function cmdColeta(){const n=t=>leads.filter(l=>l.tipo===t).length;
+  $('#cmd').innerHTML=`<div class="linha" style="margin-bottom:12px"><span class="pq apagado">Em dados reais, cada fonte mostra a última leitura e alerta quando atrasa.</span><span class="esp"></span><button class="btn pq" id="b-simular" onclick="simular()">Simular novo lead</button></div>
+  <div class="tab-wrap"><table id="t-fontes"><tr><th>Fonte</th><th>Origem</th><th class="n">Registros</th><th>Última leitura</th></tr>
+  <tr><td><b>Multas</b></td><td>Consulta pública</td><td class="n">${n('MUL')}</td><td>${haQuanto(st.coleta)}</td></tr><tr><td><b>AF</b></td><td>Consulta pública</td><td class="n">${n('AF')}</td><td>${haQuanto(st.coleta)}</td></tr><tr><td><b>Protocolos</b></td><td>Consulta pública</td><td class="n">${n('PRO')}</td><td>${haQuanto(st.coleta)}</td></tr>
+  <tr><td><b>Exigências, prazo e área</b></td><td>e-SCI, só dados da edificação</td><td class="n">${leads.filter(l=>l.exig&&l.exig.length).length}</td><td>${haQuanto(st.coleta)}</td></tr><tr><td><b>Situação dos projetos</b></td><td>e-SCI, só dados da edificação</td><td class="n">${n('PRO')}</td><td>${haQuanto(st.coleta)}</td></tr></table></div>
+  <p class="pq apagado" style="margin-top:10px">Nome, CPF/CNPJ, celular, e-mail e endereço de responsáveis e nome de agentes públicos não são gravados.</p>`;}
+function cmdRegras(){const c=st.cfg;$('#cmd').innerHTML=`<div class="pilha" style="max-width:640px"><div class="regra"><div><b>Revisar cliente sem visita há (dias)</b><div class="pq apagado">Vale quando a última visita foi comprovada. O cliente não é liberado sozinho: entra na sua lista de revisão. Fechado ou com retorno futuro não entra.</div></div><input class="inp" id="r-dias" type="number" min="7" max="365" value="${c.reserva}" onchange="regra('reserva',this.value,7,365)"></div>
+  <div class="regra"><div><b>Revisar antes, se a visita não foi comprovada (dias)</b><div class="pq apagado">Vale quando o vendedor registrou a visita sem o GPS.</div></div><input class="inp" id="r-sem" type="number" min="1" max="365" value="${c.reservaSem}" onchange="regra('reservaSem',this.value,1,365)"></div>
+  <div class="regra"><div><b>Distância para comprovar (metros)</b><div class="pq apagado">O vendedor precisa estar até essa distância do endereço. O GPS e o endereço têm margem de erro.</div></div><input class="inp" id="r-prova" type="number" min="50" max="1000" step="10" value="${c.prova}" onchange="regra('prova',this.value,50,1000)"></div>
+  <div class="regra" style="grid-template-columns:minmax(0,1fr)"><div><b>Tipos de venda</b><div class="pq apagado">Aparecem na aba Vendas. Ajuste para os serviços que vocês fazem.</div></div><div class="chips" id="r-vendas">${VENDAS.map(k=>`<button class="chip" onclick="rmVenda(this.dataset.k)" data-k="${esc(k)}" title="Remover">${esc(k)} ×</button>`).join('')}</div><div class="linha"><input class="inp" id="r-nova" style="flex:1;min-width:160px" placeholder="Novo tipo de venda"><button class="btn pq" id="r-add" onclick="addVenda()">Adicionar</button></div></div>
+  <div class="regra"><div><b>Aviso: mínimo de AF por cidade</b><div class="pq apagado">A partir dessa quantidade sem dono, os vendedores recebem o aviso daquela cidade.</div></div><input class="inp" id="r-amin" type="number" min="1" max="50" value="${c.alertaMin}" onchange="regra('alertaMin',this.value,1,50)"></div>
+  <div class="regra"><div><b>Aviso: AF vencendo em até (dias)</b><div class="pq apagado">Conta só o prazo que ainda não venceu.</div></div><input class="inp" id="r-adias" type="number" min="1" max="60" value="${c.alertaDias}" onchange="regra('alertaDias',this.value,1,60)"></div>
+  <div class="regra"><div><b>Raio de conflito (metros)</b><div class="pq apagado">Duas obras de vendedores diferentes dentro desse raio pedem decisão sua.</div></div><input class="inp" id="r-raio" type="number" min="20" max="1000" step="10" value="${c.raio}" onchange="regra('raio',this.value,20,1000)"></div></div>`;}
+function addVenda(){const v=$('#r-nova').value.trim();if(v.length<2)return toast('Digite o nome do tipo.');if(VENDAS.some(x=>norm(x)===norm(v)))return toast('Esse tipo já existe.');VENDAS.splice(VENDAS.length-1,0,v);pintar();}
+function rmVenda(k){const i=VENDAS.indexOf(k);if(i>=0)VENDAS.splice(i,1);pintar();}
+function regra(k,v,a,b){const n=Math.min(b,Math.max(a,Math.round(+v)||a));st.cfg[k]=n;toast('Regra atualizada.');pintar();}
+function derrubar(id){const c=conta(id);c.sess=false;toast(c.nome+' foi desconectado(a).');pintar();}
+function pedirTodos(){abrirModal(`<h3>Desconectar todos?</h3><p style="margin:0">Todas as sessões, menos a sua, serão encerradas. As contas continuam ativas.</p><div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="m-ok" style="background:#fff;color:#111" onclick="derrubarTodos()">Desconectar</button></div>`);}
+function derrubarTodos(){let n=0;contas.forEach(c=>{if(c!==st.eu&&c.sess){c.sess=false;n++;}});fecharModal();toast(n+' sessão(ões) encerrada(s).');pintar();}
+function alternarBloq(id){const c=conta(id);if(c===st.eu)return;c.bloq=!c.bloq;if(c.bloq)c.sess=false;toast(c.nome+(c.bloq?' bloqueado(a).':' desbloqueado(a).'));pintar();}
+function modalSenha(id){const c=conta(id);abrirModal(`<h3>Trocar senha</h3><p class="apagado pq" style="margin:0">${esc(c.email)}</p><div class="erro" id="m-erro" hidden></div><label class="c">Nova senha<input class="inp" id="m-s1" type="password" autocomplete="new-password"></label><label class="c">Repetir<input class="inp" id="m-s2" type="password" autocomplete="new-password"></label><div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="m-ok" style="background:#fff;color:#111" onclick="salvarSenha('${id}')">Salvar</button></div>`);}
+function salvarSenha(id){const a=$('#m-s1').value,b=$('#m-s2').value,e=$('#m-erro');if(a.length<12){e.textContent='Use pelo menos 12 caracteres.';e.hidden=false;return;}if(a!==b){e.textContent='As senhas não conferem.';e.hidden=false;return;}const c=conta(id);if(c!==st.eu)c.sess=false;fecharModal();toast('Senha trocada.'+(c!==st.eu?' '+c.nome+' foi desconectado(a).':''));pintar();}
+function modalNova(){abrirModal(`<h3>Nova conta de vendedor</h3><div class="erro" id="m-erro" hidden></div><label class="c">Nome<input class="inp" id="m-nome"></label><label class="c">E-mail<input class="inp" id="m-mail" type="email"></label><label class="c">Senha inicial<input class="inp" id="m-s1" type="password" autocomplete="new-password"></label><div class="fim"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn" id="m-ok" style="background:#fff;color:#111" onclick="criarConta()">Criar</button></div>`);}
+function criarConta(){const n=$('#m-nome').value.trim(),m=$('#m-mail').value.trim().toLowerCase(),s=$('#m-s1').value,e=$('#m-erro'),f=t=>{e.textContent=t;e.hidden=false;};if(!n)return f('Informe o nome.');if(!/^\S+@\S+\.\S+$/.test(m))return f('E-mail inválido.');if(contas.some(c=>c.email===m))return f('Já existe conta com esse e-mail.');if(s.length<12)return f('Use pelo menos 12 caracteres.');
+  const cores=['var(--v5)','var(--v1)','var(--v2)','var(--v3)','var(--v4)'];contas.push({id:'u'+Date.now(),nome:n,l:n[0].toUpperCase(),cor:cores[(contas.length-5)%5],email:m,papel:'vendedor',bloq:false,sess:false,ip:'203.0.113.99',ap:'—',ent:0,ult:0,ultLogin:0});fecharModal();toast('Conta criada.');pintar();}
+function csvUso(){const lin=[['dia','vendedor','primeira_entrada','ultima_atividade','ip','aparelho','logins','minutos_ativos','abertos','pegos','status_marcados','visitas','visitas_comprovadas']];Object.keys(uso).sort().forEach(k=>Object.entries(uso[k]).forEach(([id,u])=>lin.push([k,conta(id).nome,fmtHora(u.ent),fmtHora(u.ult),u.ip,u.ap,u.logins,u.min,u.abertos,u.pegos,u.marcados,u.visitas||0,u.comprovadas||0])));return lin.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(';')).join('\r\n');}
+function baixarCsv(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+csvUso()],{type:'text/csv;charset=utf-8'}));a.download='uso_radar.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+
+/* ========== chegada de lead (simulada) ========== */
+let seqSim=900;
+function ding(){try{const a=new (window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.frequency.value=880;g.gain.value=.06;o.start();o.stop(a.currentTime+.2);}catch(e){}}
+function simular(t){const tipo=t||['MUL','AF','PRO'][Math.floor(Math.random()*3)],l=novoLead(tipo,seqSim++,Date.now());leads.unshift(l);st.coleta=Date.now();if(st.som)ding();
+  $('#camada-flash').innerHTML=`<button id="flash" class="${tipo}" onclick="st.vista='radar';$('#camada-flash').innerHTML='';pintar();abrir('${l.id}',true)"><b>NOVA ${TIPO[tipo].g}</b><span>${esc(l.nome)} · ${esc(l.cidade)}</span></button>`;
+  clearTimeout(simular.t);simular.t=setTimeout(()=>{$('#camada-flash').innerHTML='';},7000);pintar();return l;}
+
+/* ========== modal ========== */
+function abrirModal(h,larga){$('#camada-modal').innerHTML=`<div id="modal" onclick="if(event.target===this)fecharModal()"><div class="cx-modal ${larga?'larga':''}" role="dialog" aria-modal="true"><button class="x-modal" aria-label="Fechar" onclick="fecharModal()">×</button>${h}</div></div>`;}
+function fecharModal(){$('#camada-modal').innerHTML='';}
+
+</script>
+<script src="radar.js"></script>
+</body>
+</html>
